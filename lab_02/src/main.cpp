@@ -4,7 +4,8 @@
 #include <vector>
 #include <charconv>
 
-double calculate(double x){
+double calculate(double x)
+{
     return pow(x, 2) - pow(x, 2) + x * 4 - x * 5 + x + x;
 }
 
@@ -23,17 +24,19 @@ int main(int argc, char *argv[])
         v.push_back(string(argv[idx]));
     double x;
     int n;
-    auto [_ptr, ec] = from_chars(v[0].data(), v[0].data()+v[0].size(),x);   
-    if (ec != std::errc()){
+    auto [_ptr, ec] = from_chars(v[0].data(), v[0].data() + v[0].size(), x);
+    if (ec != std::errc())
+    {
         cout << "Wrong first argument format\n";
         return 1;
     }
-    auto [_ptr2, ec2] = from_chars(v[1].data(), v[1].data()+v[1].size(),n);
-    if (ec2 != std::errc()){
+    auto [_ptr2, ec2] = from_chars(v[1].data(), v[1].data() + v[1].size(), n);
+    if (ec2 != std::errc())
+    {
         cout << "Wrong second argument format\n";
         return 1;
     }
-    cout << "x = " << x<<"\nn = " << n << endl;
+    cout << "x = " << x << "\nn = " << n << endl;
     auto start = chrono::high_resolution_clock::now();
     for (int k = 0; k < n; ++k)
         x = calculate(x);
