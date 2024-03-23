@@ -1,8 +1,7 @@
 #include <iostream>
 #include <chrono>
 #include <cmath>
-#include <vector>
-#include <charconv>
+#include <sstream>
 
 double calculate(double x)
 {
@@ -19,19 +18,20 @@ int main(int argc, char *argv[])
         cout << "Wrong number of arguments\n";
         return 1;
     }
-    vector<string> v;
-    for (size_t idx = 1; idx < argc; ++idx)
-        v.push_back(string(argv[idx]));
     double x;
     int n;
-    auto [_ptr, ec] = from_chars(v[0].data(), v[0].data() + v[0].size(), x);
-    if (ec != std::errc())
+    auto input = istringstream(argv[1]);
+    cin.rdbuf(input.rdbuf());
+    cin >> x;
+    if (cin.fail() || !cin.eof())
     {
         cout << "Wrong first argument format\n";
         return 1;
     }
-    auto [_ptr2, ec2] = from_chars(v[1].data(), v[1].data() + v[1].size(), n);
-    if (ec2 != std::errc())
+    input = istringstream(argv[2]);
+    cin.rdbuf(input.rdbuf());
+    cin >> n;
+    if (cin.fail() || !cin.eof())
     {
         cout << "Wrong second argument format\n";
         return 1;
