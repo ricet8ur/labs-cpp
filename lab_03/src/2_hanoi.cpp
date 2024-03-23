@@ -1,7 +1,6 @@
 #include <iostream>
 #include <cmath>
-#include <vector>
-#include <charconv>
+#include <sstream>
 #include <deque>
 #include <utility>
 using namespace std;
@@ -20,6 +19,21 @@ void calculate(int from, int to, int x, deque<pair<int, int>> &g)
     calculate(third(from, to), to, x - 1, g);
 }
 
+template <typename T, typename S1, typename S2>
+bool read_arg(S1 name, S2 from, T &to)
+{
+    using namespace std;
+    auto input = istringstream(from);
+    cin.rdbuf(input.rdbuf());
+    cin >> to;
+    if (cin.fail() || !cin.eof())
+    {
+        cout << "Wrong " << name << " argument format\n";
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -27,16 +41,9 @@ int main(int argc, char *argv[])
         cout << "Wrong number of arguments\n";
         return 1;
     }
-    vector<string> v;
-    for (size_t idx = 1; idx < argc; ++idx)
-        v.push_back(string(argv[idx]));
     int n;
-    auto [_ptr, ec] = from_chars(v[0].data(), v[0].data() + v[0].size(), n);
-    if (ec != std::errc())
-    {
-        cout << "Wrong first argument format\n";
+    if (read_arg("first", argv[1], n))
         return 1;
-    }
     deque<pair<int, int>> g;
     calculate(0, 2, n, g);
     while (g.size() > 0)

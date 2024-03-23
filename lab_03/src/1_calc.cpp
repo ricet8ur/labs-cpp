@@ -1,19 +1,34 @@
 #include <iostream>
-#include <vector>
-#include <charconv>
+#include <sstream>
 
 double my_pow(double a, int n)
 {
     if (n == 0)
-        return a;
+        return 1;
     if (n > 0)
     {
+        double part = my_pow(a, n / 2);
         if (n % 2 == 0)
-            return my_pow(a, n / 2);
+            return part * part;
         else
-            return my_pow(a, n / 2) * a;
-    }  
+            return part * part * a;
+    }
     return 1 / my_pow(a, -n);
+}
+
+template <typename T, typename S1, typename S2>
+bool read_arg(S1 name, S2 from, T &to)
+{
+    using namespace std;
+    auto input = istringstream(from);
+    cin.rdbuf(input.rdbuf());
+    cin >> to;
+    if (cin.fail() || !cin.eof())
+    {
+        cout << "Wrong " << name << " argument format\n";
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -24,24 +39,13 @@ int main(int argc, char *argv[])
         cout << "Wrong number of arguments\n";
         return 1;
     }
-    vector<string> v;
-    for (size_t idx = 1; idx < argc; ++idx)
-        v.push_back(string(argv[idx]));
     double a;
     double b;
-    char op = v[1][0];
-    auto [_ptr, ec] = from_chars(v[0].data(), v[0].data() + v[0].size(), a);
-    if (ec != std::errc())
-    {
-        cout << "Wrong first argument format\n";
+    char op = argv[2][0];
+    if (read_arg("first", argv[1], a))
         return 1;
-    }
-    auto [_ptr2, ec2] = from_chars(v[2].data(), v[2].data() + v[2].size(), b);
-    if (ec2 != std::errc())
-    {
-        cout << "Wrong second argument format\n";
+    if (read_arg("third", argv[3], b))
         return 1;
-    }
     double result;
     if (op == '+')
         result = a + b;
@@ -53,7 +57,7 @@ int main(int argc, char *argv[])
         result = my_pow(a, b);
     else
     {
-        cout << "Wrong operation\n";
+        cout << "Wrong operation \'" << op << "\'. Use only: + - * ^\n";
         return 1;
     }
     cout << a << " " << op << " " << b << " = " << result << endl;
