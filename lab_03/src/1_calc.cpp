@@ -1,112 +1,156 @@
 #include <iostream>
 #include <sstream>
+#include <cassert>
+#include <limits>
 
-double my_pow(double a, int n)
+// pow(double, int)
+double constexpr my_pow(double a, int n)
 {
+    // by def
     if (n == 0)
         return 1;
+    // border case
+    if (a == 0.)
+        return n > 0 ? 0 : std::numeric_limits<double>::infinity();
+
     if (n > 0)
     {
-        double part = my_pow(a, int(n / 2));
+        auto part = my_pow(a, n / 2);
         if (n % 2 == 0)
             return part * part;
         else
             return part * part * a;
     }
-    return 1 / my_pow(a, -n);
+    else
+        return 1 / my_pow(a, -n);
 }
 
-// works for 0<x<2
-double log_teylor_series(double x, size_t N = 5)
+// pow(double, double)
+
+// precision bound
+constexpr double eps = 1e-14;
+// iteration bound
+constexpr size_t K = 100;
+// reduction bound
+constexpr double B = 0.3;
+// Finding necessary number of iterations for taylor serier of ln(x)
+// knowing the bound B of an argument due to reduction
+// error of ln(1+x) approximation is given by the first discarded term
+// | B^n/n |
+size_t constexpr ln_iterations_count()
 {
-    const auto a = x - 1;
-    auto a_k = a;
-    auto y = a; // log value
-    for (size_t k = 2; k < N; ++k)
+    int n = 1;
+    while (my_pow(B, n + 1) / (n + 1) > eps)
     {
-        a_k = -a_k * a;
-        y = y + a_k / k;
+        ++n;
+        if (n > K)
+            break;
+    }
+    return n;
+}
+
+double ln_taylor(double x)
+{
+    assert((0. < x) && (x < 2.) && "x out of range (0,2) when calling ln_taylor(x)");
+    if (x == 0.)
+        return -std::numeric_limits<double>::infinity();
+    if (x < 0. || x >= 2.)
+        return std::numeric_limits<double>::quiet_NaN(); // since no convergence
+
+    x = x - 1;
+    auto a_k = x;
+    auto y = x; // log value
+    for (size_t k = 2; k < ln_iterations_count(); ++k)
+    {
+        a_k = -a_k * x;
+        y += a_k / k;
     }
     return y;
 }
 
-double my_sqrt(double d)
+double my_sqrt(double x)
 {
-    double root = d / 2;
-    double eps = 1e-14;
-    for (size_t k = 0; k < 100; ++k)
+    assert((x >= 0.) && "x < 0 when calling my_sqrt(x)");
+
+    double r = x / 2; // root
+    for (size_t k = 0; k < K; ++k)
     {
-        if (root * root - d < eps * root && root * root - d > -eps * root)
+        if (r * r - x < eps && r * r - x > -eps)
             break;
-        root = 0.5 * (root + d / root);
+        r = (r + x / r) / 2;
     }
-    return root;
+    return r;
 }
 
-double ln_reduction(double x, size_t N)
+double my_ln(double x)
 {
-    const auto b = 0.3;
+    assert((x > 0.) && "x <= 0 when calling my_ln(x)");
+    if (x < 0.)
+        return std::numeric_limits<double>::quiet_NaN();
+    if (x < 1)
+        return -my_ln(1 / x);
+
+    // reduction
     int n = 0;
-    auto t = x;
-    while (1 + b <= t)
+    while (1 + B <= x)
     {
         n += 1;
-        t = my_sqrt(t);
+        x = my_sqrt(x);
     }
-    return my_pow(2, n) * log_teylor_series(t, N = N);
+    return my_pow(2, n) * ln_taylor(x);
 }
 
-double my_ln(double x, double eps)
+size_t constexpr exp_iterations_count()
 {
-    const auto b = 0.3;
     int n = 1;
-    const auto a = x - 1;
-    if (a > 0)
+    // B^n decreases fast enough
+    // to not take n! into consideration
+    while (my_pow(B, n + 1) > eps)
     {
-
-        while (my_pow(b / (1 + b), int(n + 1)) / (n + 1) > eps)
-        {
-            n += 1;
-            if (n > 100)
-                break;
-        }
+        ++n;
+        if (n > K)
+            break;
     }
-    else
-        return -my_ln(1 / x, eps);
-    return ln_reduction(x, n);
+    return n;
 }
 
-// works for 0<x<2, arbitrary r
-double exp_teylor_series(double r, size_t N = 5)
+// expect x in [-1,1] for faster convergence
+double exp_taylor(double x)
 {
-    const auto a = r;
+    assert((-1. < x) && (x < 1.) && "x out of range (-1,1) when calling exp_taylor(x)");
+    if (x == 0.)
+        return 1.;
+
     auto a_k = 1.;
     auto y = 1.; // exp value
-    for (size_t k = 1; k < N; ++k)
+    for (size_t k = 1; k < exp_iterations_count(); ++k)
     {
-        a_k *= a / k;
+        a_k *= x / k;
         y += a_k;
     }
     return y;
 }
 
+// taylor + argument reduction
 double my_pow(double a, double b)
 {
-    if (a < 0)
+    if (double(int(b)) == b)
+        return my_pow(a, int(b));
+    // by def
+    if (a < 0.)
         a = -a;
     if (a == 0.)
         return b == 0. ? 1 : 0;
+    // a > 0.
     // a^b = exp(b ln a)
-    // exp(x) = exp^(z ln1.5 + r)
-    // exp(x) = 1.5^(z) exp(r)
-    // ln 1.5 since teylor works for x < 2
-    auto eps = 1e-10;
-    auto x = b * my_ln(a, eps);
-    auto c = log_teylor_series(1.5, 100);
+    // exp(x) = exp^(z ln2 + r)
+    //        = 2^z exp(r)
+    auto x = b * my_ln(a);
+    auto c = my_ln(2);
     auto z = int(x / c);
     auto r = x - z * c;
 
-    return my_pow(1.5, int(z)) * exp_teylor_series(r, 100);
+    return my_pow(2, z) * exp_taylor(r);
 }
 
 template <typename T, typename S1, typename S2>
@@ -151,18 +195,7 @@ int main(int argc, char *argv[])
     else if (op == '*')
         result = a * b;
     else if (op == '^')
-    {
-        if (double(int(b)) == b)
-        {
-            result = my_pow(a, int(b));
-            cout << "b is an integer: " << b << '\n';
-        }
-        else
-        {
-            result = my_pow(a, b);
-            cout << "b is double: " << b << '\n';
-        }
-    }
+        result = my_pow(a, b);
     else
     {
         cout << "Wrong operation \'" << op << "\'. Use only: + - * ^\n";
