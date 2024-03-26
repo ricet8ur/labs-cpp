@@ -124,6 +124,7 @@ bool read_arg(S1 name, S2 from, T &to)
 
 int main(int argc, char *argv[])
 {
+    // for debug purposes
     // argc = 2;
     // char *arg[] = {"","6"};
     // argv = arg;
@@ -135,7 +136,7 @@ int main(int argc, char *argv[])
     int n;
     if (read_arg("first", argv[1], n))
         return 1;
-    // Use default deque
+    // Use std::deque
     deque<pair<int, int>> g;
     calculate_hanoi(0, 2, n, g);
     while (g.size() > 0)
