@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
 {
     using namespace std;
     double x = 1;
-    test(x, 10);
-    test(x, 100);
+    test(x, 10000);
+    test(x, 100000);
     return 0;
 }
