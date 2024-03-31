@@ -1,3 +1,5 @@
+// This is a personal academic project. Dear PVS-Studio, please check it.
+// PVS-Studio Static Code Analyzer for C, C++, C#, and Java: https://pvs-studio.com
 #include <iostream>
 #include <chrono>
 #include <cmath>
@@ -19,7 +21,8 @@ public:
     shared_ptr<base> self;
     vector<shared_ptr<base>> next_exprs;
     vector<shared_ptr<base>> prev_exprs;
-    base(shared_ptr<base> other):self{other}{}
+    base(shared_ptr<base> other) : self{other} {}
+    virtual ~base() {};
     bool is_calculated() const
     {
         return _calculated.load();
@@ -29,7 +32,7 @@ public:
 };
 
 template <typename T>
-class expression : public base
+class expression final : public base
 {
     T _result;
     function<T()> f;
@@ -40,13 +43,16 @@ public:
     {
         _calculated.store(other.is_calculated());
     }
+    ~expression(){
+        prev_exprs.clear();
+        next_exprs.clear();
+    }
     // expression(const expression *other) : f{other->f}, context{other->context}, base(shared_ptr<expression>(this))
     // {
     //     _calculated.store(other->is_calculated());
     // }
     expression(ppp &context, function<T()> f) : f{f}, context{context}, base(shared_ptr<expression>(this)) { _calculated.store(false); }
     expression(ppp &context, function<T()> f, T result) : _result{result}, f{f}, context{context}, base(shared_ptr<expression>(this)) { _calculated.store(false); }
-
     T result()
     {
         return _result;
@@ -63,7 +69,7 @@ public:
 
     vector<shared_ptr<base>> get_next_exprs()
     {
-            // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
+        // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
         vector<shared_ptr<base>> new_calculators;
         if (!atomic_exchange(&_calculated, true))
         {
@@ -136,7 +142,10 @@ public:
             // start read-write parallel wrap
             for (auto e : q)
             {
-                futures.emplace_back(async(&base::get_next_exprs, e));
+                auto prom = promise<vector<shared_ptr<base>>>();
+                prom.set_value(e->get_next_exprs());
+                futures.emplace_back(prom.get_future());
+                // futures.emplace_back(async(&base::get_next_exprs, e.get()));
                 cout << q.size() << 'b' << endl;
             }
             cout << q.size() << 'r' << endl;
@@ -150,7 +159,7 @@ public:
             //     // e->get_next_exprs();
             //     futures2.emplace_back(async(&base::get_next_exprs, e));
             // }
-             q.clear();
+            q.clear();
 
             // fill next wrap
             for (auto &fv : futures)
@@ -158,8 +167,8 @@ public:
                 cout << q.size() << 'r' << endl;
                 auto fw = fv.get();
                 cout << q.size() << 'r' << endl;
-                for (auto fw : fv.get())
-                    q.emplace_back(fw);
+                for (auto fa : fw)
+                    q.emplace_back(fa);
             }
             futures.clear();
         }
