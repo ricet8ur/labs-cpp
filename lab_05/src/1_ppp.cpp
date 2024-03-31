@@ -10,79 +10,79 @@
 using namespace std;
 
 class ppp;
-struct fwrapper
+class base
 {
-    function<vector<fwrapper>()> v;
+protected:
+    atomic<bool> _calculated{0};
+
+public:
+    shared_ptr<base> self;
+    vector<shared_ptr<base>> next_exprs;
+    vector<shared_ptr<base>> prev_exprs;
+    base(shared_ptr<base> other):self{other}{}
+    bool is_calculated() const
+    {
+        return _calculated.load();
+    }
+    // virtual void calculate() = 0;
+    virtual vector<shared_ptr<base>> get_next_exprs() = 0;
 };
-using fvf = function<vector<fwrapper>()>;
 
 template <typename T>
-class expression
+class expression : public base
 {
-    atomic<bool> _calculated{0};
     T _result;
     function<T()> f;
 
 public:
     ppp &context;
-    vector<expression<T> *> next_exprs;
-    vector<expression<T> *> prev_exprs;
-
-    expression(const expression &other) : f{other.f}, context{other.context}, next_exprs{}
+    expression(const expression &other) : f{other.f}, context{other.context}, base(shared_ptr<expression>(this))
     {
         _calculated.store(other.is_calculated());
     }
-    expression(ppp &context, function<T()> f) : f{f}, context{context}, next_exprs{} { _calculated.store(false); }
-    expression(ppp &context, function<T()> f, T result) : _result{result}, f{f}, context{context}, next_exprs{} { _calculated.store(false); }
-
-    bool is_calculated() const
-    {
-        return _calculated.load();
-    }
+    // expression(const expression *other) : f{other->f}, context{other->context}, base(shared_ptr<expression>(this))
+    // {
+    //     _calculated.store(other->is_calculated());
+    // }
+    expression(ppp &context, function<T()> f) : f{f}, context{context}, base(shared_ptr<expression>(this)) { _calculated.store(false); }
+    expression(ppp &context, function<T()> f, T result) : _result{result}, f{f}, context{context}, base(shared_ptr<expression>(this)) { _calculated.store(false); }
 
     T result()
     {
         return _result;
     }
 
-    fwrapper get_calculator()
-    {
-        return fwrapper
-        {
-            fvf
-            {
-                [&]() mutable -> vector<fwrapper>
-                {
-                if (is_calculated())
-                    return vector<fwrapper>{};
-                else{
-                             _result = f();
-                    cout<<_result<<'a'<<std::this_thread::get_id()<<endl;
-                             _calculated.store(true);
-                             return vector<fwrapper>{get_new_calculators()}; } }
-            }
-        };
-    }
+    // void calculate()
+    // {
+    //     if (!atomic_exchange(&_calculated, true))
+    //     {
+    //         _result = f();
+    //         cout << _result << 'a' << std::this_thread::get_id() << endl;
+    //     }
+    // }
 
-    fwrapper get_new_calculators()
+    vector<shared_ptr<base>> get_next_exprs()
     {
-        return fwrapper{fvf{[&]() mutable -> vector<fwrapper>
-                            {
-            vector<fwrapper> new_calculators;
-            for (expression<T> *next_expr : next_exprs)
+            // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
+        vector<shared_ptr<base>> new_calculators;
+        if (!atomic_exchange(&_calculated, true))
+        {
+            _result = f();
+            // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
+            for (shared_ptr<base> next_expr : next_exprs)
             {
                 // check next expression is ready to be calculated
                 bool pre = true;
-                for (expression<T> *pre_expr : next_expr->prev_exprs){
+                for (shared_ptr<base> pre_expr : next_expr->prev_exprs)
+                {
                     pre = pre && pre_expr->is_calculated();
-
                 }
-                if (pre&&!next_expr->prev_exprs.empty())
-                    new_calculators.emplace_back(next_expr->get_calculator());
-
+                if (pre && !next_expr->prev_exprs.empty())
+                    new_calculators.push_back(next_expr);
             }
-                cout<<_result<<'g'<<new_calculators.size()<<endl;
-            return new_calculators; }}};
+        }
+        // cout << _result << 'g' << new_calculators.size() << endl;
+        return new_calculators;
     }
 };
 template <typename T>
@@ -93,10 +93,10 @@ auto operator+(expression<T> &lhs, expression<T> &rhs)
                                    { 
                                     cout<<'d'<<endl;
                                     return lhs.result() + rhs.result(); }));
-    exp.prev_exprs.emplace_back(&lhs);
-    exp.prev_exprs.emplace_back(&rhs);
-    lhs.next_exprs.emplace_back(&exp);
-    rhs.next_exprs.emplace_back(&exp);
+    exp.prev_exprs.emplace_back(lhs.self);
+    exp.prev_exprs.emplace_back(rhs.self);
+    lhs.next_exprs.emplace_back(exp.self);
+    rhs.next_exprs.emplace_back(exp.self);
     cout << exp.context.q.size() << ' ';
     return exp;
 }
@@ -105,7 +105,7 @@ class ppp
 {
 
 public:
-    deque<fwrapper> q;
+    deque<shared_ptr<base>> q;
     // example T: double
     // example F: lambda(expression,expression)->T
     //            lambda()->T
@@ -115,50 +115,53 @@ public:
     auto add_variable(const T t)
     {
         auto exp = expression(
-            *this, function<T()>([t]()mutable -> T
-                            { 
+            *this, function<T()>([t]() mutable -> T
+                                 { 
                                     cout<<'p'<<endl;
                                 return t; }),
             23.);
-        exp.context.q.push_back(exp.get_calculator());
+        q.emplace_back(exp.self);
+        // exp.context.q.push_back(exp);
         return exp;
     }
 
     auto calculate()
     {
-        auto futures = deque<future<vector<fwrapper>>>{};
-        auto futures2 = deque<future<vector<fwrapper>>>{};
+        // auto futures = deque<pair<shared_ptr<base>, future<void>>>{};
+        auto futures = deque<future<vector<shared_ptr<base>>>>{};
         while (!q.empty())
         {
             cout << q.size() << 'w' << endl;
 
             // start read-write parallel wrap
-            for (auto &&c : q)
+            for (auto e : q)
             {
-                futures.emplace_back(async(c.v));
+                futures.emplace_back(async(&base::get_next_exprs, e));
+                cout << q.size() << 'b' << endl;
             }
-            cout << q.size() << 'b' << endl;
+            cout << q.size() << 'r' << endl;
 
-            q.clear();
-            // parallel read-only preparation wrap
-            for (auto &fv : futures)
-            {
-                auto v = fv.get();
-                cout << q.size() << v.size() << 'c' << endl;
-                for (auto &fw : v)
-                {
-                    futures2.emplace_back(async(fw.v));
-                }
-            }
-            futures.clear();
+            // // parallel read-only preparation wrap
+            // for (auto &ef : futures)
+            // {
+            //     auto &[e, f] = ef;
+            //     cout << futures.size() << 'c' << endl;
+            //     f.get();
+            //     // e->get_next_exprs();
+            //     futures2.emplace_back(async(&base::get_next_exprs, e));
+            // }
+             q.clear();
 
             // fill next wrap
-            for (auto &&fv : futures2)
+            for (auto &fv : futures)
             {
-                for (auto &&fw : fv.get())
+                cout << q.size() << 'r' << endl;
+                auto fw = fv.get();
+                cout << q.size() << 'r' << endl;
+                for (auto fw : fv.get())
                     q.emplace_back(fw);
             }
-            futures2.clear();
+            futures.clear();
         }
     }
 };
