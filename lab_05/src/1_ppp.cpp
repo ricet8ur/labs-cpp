@@ -1,189 +1,250 @@
-#include <iostream>
+#include <atomic>
 #include <chrono>
 #include <cmath>
-#include <thread>
-#include <unordered_map>
 #include <deque>
 #include <functional>
 #include <future>
-#include <atomic>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 using namespace std;
 
-class ppp;
+class ppp {
+	class base {
+	protected:
+		atomic<bool> _calculated { false };
+		bool rval { false };
 
-class base
-{
-protected:
-    atomic<bool> _calculated{0};
+	public:
+		atomic<bool> _to_be_calculated { false };
+		size_t self;
+		vector<size_t> next;
+		vector<size_t> prev;
+		base(size_t id)
+			: self { id }
+			, next {}
+			, prev {}
+		{
+		}
+		base()
+			: self {}
+			, next {}
+			, prev {}
+		{
+		}
+		base(const base& other)
+			: self { other.self }
+			, next { other.next }
+			, prev { other.prev }
+		{
+		}
 
-public:
-    ppp &context;
-    size_t self;
-    base(const base &other) : self{other.self}, context{other.context} {}
-    base(ppp &context) : context{context}
-    {
-    }
-
-    bool is_calculated() const
-    {
-        return _calculated.load();
-    }
-    virtual vector<size_t> get_next_exprs() = 0;
-};
-
-template <typename T>
-class expression;
-
-template <typename T>
-class var final : public base
-{
-    T _result;
-    prev
-public:
-    var(const var &other) : base{other} {}
-    var(const expression &other) : base{other} {}
-
-    T result()
-    {
-        return _result;
-    }
-
-    vector<size_t> get_next_exprs()
-    {
-        vector<size_t> new_calculators;
-        if (!atomic_exchange(&_calculated, true))
-        {
-            _result = f();
-            for (size_t next_expr : next_exprs)
-            {
-                // check next expression is ready to be calculated
-                bool pre = true;
-                for (size_t pre_expr : next_expr->prev_exprs)
-                {
-                    pre = pre && pre_expr->is_calculated();
-                }
-                if (pre && !next_expr->prev_exprs.empty())
-                    new_calculators.push_back(next_expr);
-            }
-        }
-        return new_calculators;
-    }
-};
-// aka rvalue<T>
-template <typename T>
-class expression final : public base
-{
-    T _result;
-    function<T()> f;
+		bool is_calculated() const
+		{
+			return _calculated.load();
+		}
+		virtual vector<size_t> get_next_exprs() = 0;
+		virtual ~base()
+		{
+		}
+	};
 
 public:
-    expression(const expression &other) : f{other.f}, base(other)
-    {
-        _calculated.store(other.is_calculated());
-    }
-    expression(ppp &context, function<T()> f) : f{f}, base{context}
-    {
-        _calculated.store(false);
-        ++constext.aa;
-    }
-    expression(ppp &context, function<T()> f, T result) : _result{result}, f{f}, base(context)
-    {
-        _calculated.store(false);
-        ++constext.aa;
-    }
-    T result()
-    {
-        return _result;
-    }
+	size_t aa = 0;
+	unordered_map<size_t, base*> exps;
+	unordered_set<size_t> vars;
 
-    vector<size_t> get_next_exprs()
-    {
-        // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
-        vector<size_t> new_calculators;
-        if (!atomic_exchange(&_calculated, true))
-        {
-            _result = f();
-            // cout << _result << 'a' << std::this_thread::get_id() << flush<<endl;
-            for (size_t next_expr : next_exprs)
-            {
-                // check next expression is ready to be calculated
-                bool pre = true;
-                for (size_t pre_expr : next_expr->prev_exprs)
-                {
-                    pre = pre && pre_expr->is_calculated();
-                }
-                if (pre && !next_expr->prev_exprs.empty())
-                    new_calculators.push_back(next_expr);
-            }
-        }
-        // cout << _result << 'g' << new_calculators.size() << endl;
-        return new_calculators;
-    }
+	auto calculate()
+	{
+		deque<size_t> q;
+		for (auto var : vars) {
+			if (exps.at(var)->is_calculated())
+				q.push_back(var);
+		}
+		auto futures = deque<future<vector<size_t>>> {};
+		while (!q.empty()) {
+			// start read-write parallel wrap
+			for (auto id : q) {
+				auto* v = exps.at(id);
+				// auto prom = promise<vector<size_t>>{};
+				// prom.set_value(v->get_next_exprs());
+				// futures.emplace_back(prom.get_future());
+				futures.emplace_back(async(&base::get_next_exprs, v));
+				// cout << q.size() << 'b' << endl;
+			}
+			// cout << q.size() << 'r' << endl;
+			q.clear();
+			// fill next wrap
+			for (auto& fv : futures) {
+				// cout << q.size() << 'r' << endl;
+				auto vec_id = fv.get();
+				// cout << q.size() << 'r' << endl;
+				for (auto id : vec_id)
+					q.push_back(id);
+			}
+			futures.clear();
+		}
+	}
+
+	template <typename T>
+	class expression final : public base {
+		T _result;
+		function<T(T, T)> f;
+
+	public:
+		ppp& context;
+		expression(ppp& context, function<T(T, T)> f)
+			: base {}
+			, f { f }
+			, context { context }
+		{
+			_calculated.store(false);
+			self = ++context.aa;
+			context.exps.insert(make_pair(self, this));
+		}
+		expression(ppp& context, function<T(T, T)> f, T result)
+			: base {}
+			, _result { result }
+			, f { f }
+			, context { context }
+		{
+			_calculated.store(true);
+			self = ++context.aa;
+
+			context.exps.insert(make_pair(self, this));
+		}
+		~expression()
+		{
+		}
+		T result()
+		{
+			return _result;
+		}
+
+		vector<size_t> get_next_exprs()
+		{
+			vector<size_t> new_calculators;
+			if (!atomic_exchange(&_calculated, true)) {
+				auto ra = static_cast<expression*>(context.exps.at(prev[0]))->result();
+				auto rb = static_cast<expression*>(context.exps.at(prev[1]))->result();
+				_result = f(ra, rb);
+			}
+			for (size_t next_id : next) {
+				// check if next expression is ready to be calculated
+				bool ready = true;
+				auto* next_ex = context.exps.at(next_id);
+				auto nextprev = next_ex->prev;
+				for (size_t pre_id : nextprev)
+					ready = ready && context.exps.at(pre_id)->is_calculated();
+				if (ready && !atomic_exchange(&next_ex->_to_be_calculated, true))
+					new_calculators.push_back(next_id);
+			}
+			return new_calculators;
+		}
+
+		void bind(expression& rhs, expression& lhs, expression& res)
+		{
+			context.exps.at(res.self)->prev.emplace_back(lhs.self);
+			context.exps.at(res.self)->prev.emplace_back(rhs.self);
+			context.exps.at(lhs.self)->next.emplace_back(res.self);
+			context.exps.at(rhs.self)->next.emplace_back(res.self);
+		}
+
+		auto operator+(expression& rhs)
+		{
+			auto* exp = new expression(context,
+				function<T(T, T)>([](T ra, T rb) {
+					const auto res = ra + rb;
+					ostringstream ss;
+					ss << ra << '+' << rb << '=' << res;
+					cout << ss.str() << endl;
+					return res;
+				}));
+			bind(*this, rhs, *exp);
+			return *exp;
+		}
+
+		auto operator-(expression& rhs)
+		{
+			auto* exp = new expression(context,
+				function<T(T, T)>([](T ra, T rb) {
+					const auto res = ra - rb;
+					ostringstream ss;
+					ss << ra << '-' << rb << '=' << res;
+					cout << ss.str() << endl;
+					return res;
+				}));
+			bind(*this, rhs, *exp);
+			return *exp;
+		}
+
+		auto operator*(expression& rhs)
+		{
+			auto* exp = new expression(context,
+				function<T(T, T)>([](T ra, T rb) {
+					const auto res = ra * rb;
+					ostringstream ss;
+					ss << ra << '*' << rb << '=' << res;
+					cout << ss.str() << endl;
+					return res;
+				}));
+			bind(*this, rhs, *exp);
+			return *exp;
+		}
+
+		auto operator/(expression& rhs)
+		{
+			auto* exp = new expression(context,
+				function<T(T, T)>([](T ra, T rb) {
+					const auto res = ra / rb;
+					ostringstream ss;
+					ss << ra << '/' << rb << '=' << res;
+					cout << ss.str() << endl;
+					return res;
+				}));
+			bind(*this, rhs, *exp);
+			return *exp;
+		}
+
+		auto operator+(expression&& rhs)
+		{
+			return *this + rhs;
+		}
+		auto operator-(expression&& rhs)
+		{
+			return *this - rhs;
+		}
+		auto operator*(expression&& rhs)
+		{
+			return *this * rhs;
+		}
+		auto operator/(expression&& rhs)
+		{
+			return *this / rhs;
+		}
+	};
+
+	template <typename T>
+	expression<T> add_variable(const T t)
+	{
+		auto exp = expression(*this, function<T(T, T)>([](T ra, T rb) -> T {
+			cout << "never call" << endl;
+			return ra;
+		}),
+			t);
+		vars.insert(exp.self);
+		return exp;
+	}
+	template <typename T>
+	expression<T> add_variable(const expression<T> exp)
+	{
+		vars.insert(exp.self);
+		return exp;
+	}
 };
-template <typename T>
-auto operator+(expression<T> &lhs, expression<T> &rhs)
-{
-    auto exp = expression(
-        lhs.context, function<T()>([&lhs, &rhs]() mutable -> T
-                                   { 
-                                    cout<<'d'<<endl;
-                                    return lhs.result() + rhs.result(); }));
-    exp.prev_exprs.emplace_back(lhs.self);
-    exp.prev_exprs.emplace_back(rhs.self);
-    lhs.next_exprs.emplace_back(exp.self);
-    rhs.next_exprs.emplace_back(exp.self);
-    cout << exp.context.q.size() << ' ';
-    return exp;
-}
 
-class ppp
-{
-public:
-    size_t aa = 0;
-    unordered_map<size_t, base *> q;
-    template <typename T>
-    auto add_variable(const T t)
-    {
-        auto exp = expression(
-            *this, function<T()>([t]() mutable -> T
-                                 { 
-                                    cout<<'p'<<endl;
-                                return t; }),
-            23.);
-        q.emplace(aa, exp);
-        ++aa;
-        return exp;
-    }
-
-    auto calculate()
-    {
-        auto futures = deque<future<vector<size_t>>>{};
-        while (!q.empty())
-        {
-            // start read-write parallel wrap
-            for (auto [k, v] : q)
-            {
-                auto prom = promise<vector<size_t>>{};
-                prom.set_value(v->get_next_exprs());
-                futures.emplace_back(prom.get_future());
-                // futures.emplace_back(async(&base::get_next_exprs, e.get()));
-                cout << q.size() << 'b' << endl;
-            }
-            // cout << q.size() << 'r' << endl;
-
-            // fill next wrap
-            for (auto &fv : futures)
-            {
-                cout << q.size() << 'r' << endl;
-                auto fw = fv.get();
-                cout << q.size() << 'r' << endl;
-                for (auto fa : fw)
-                    q.emplace_back(fa);
-            }
-            futures.clear();
-        }
-    }
-};
 // void test(double x, size_t n)
 // {
 //     using namespace std;
@@ -198,18 +259,21 @@ public:
 //     }
 //     auto end = chrono::high_resolution_clock::now();
 //     auto diff = end - start;
-//     cout << chrono::duration<double, chrono::seconds::period>(diff).count() << " s\n";
-//     cout << "x' = " << x << "\n";
+//     cout << chrono::duration<double, chrono::seconds::period>(diff).count()
+//     << " s\n"; cout << "x' = " << x << "\n";
 // }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
-    using namespace std;
-    double x = 1;
-    ppp p;
-    auto xp = p.add_variable(x);
-    auto yp = p.add_variable(2.);
-    auto w = xp + yp;
-    p.calculate();
-    return 0;
+	using namespace std;
+	double x = 1;
+	ppp p;
+	auto xp = p.add_variable(x);
+	auto yp = p.add_variable(2.);
+	auto w = (xp + yp) + (yp + yp);
+	p.calculate();
+	// cout << p.exps.size() << endl;
+	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()
+	// << endl;
+	return 0;
 }
