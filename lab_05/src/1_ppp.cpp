@@ -1,7 +1,6 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <deque>
 #include <functional>
 #include <future>
 #include <iomanip>
@@ -12,7 +11,11 @@
 #include <unordered_set>
 using namespace std;
 
+#define PRINT_OPERATIONS_OF_LAMBDAS
+
 class ppp {
+public:
+	bool print_thread_info { false };
 	class base {
 	protected:
 		atomic<bool> _calculated { false };
@@ -53,36 +56,28 @@ class ppp {
 		}
 	};
 
-public:
 	size_t aa = 0;
 	unordered_map<size_t, base*> exps;
 	unordered_set<size_t> vars;
 
 	auto calculate()
 	{
-		deque<size_t> q;
+		vector<size_t> q;
 		for (auto var : vars) {
 			if (exps.at(var)->is_calculated())
-				q.push_back(var);
+				q.emplace_back(var);
 		}
-		auto futures = deque<future<vector<size_t>>> {};
+		auto futures = vector<future<vector<size_t>>> {};
 		while (!q.empty()) {
 			// start read-write parallel wrap
 			for (auto id : q) {
 				auto* v = exps.at(id);
-				// auto prom = promise<vector<size_t>>{};
-				// prom.set_value(v->get_next_exprs());
-				// futures.emplace_back(prom.get_future());
 				futures.emplace_back(async(&base::get_next_exprs, v));
-				// cout << q.size() << 'b' << endl;
 			}
-			// cout << q.size() << 'r' << endl;
 			q.clear();
 			// fill next wrap
 			for (auto& fv : futures) {
-				// cout << q.size() << 'r' << endl;
 				auto vec_id = fv.get();
-				// cout << q.size() << 'r' << endl;
 				for (auto id : vec_id)
 					q.push_back(id);
 			}
@@ -144,23 +139,25 @@ public:
 				if (ready && !atomic_exchange(&next_ex->_to_be_calculated, true))
 					new_calculators.push_back(next_id);
 			}
-			ostringstream ss;
-			ss.setf(ios::fixed);
-			ss << setprecision(0);
-			ss << "expression_id: " << self << " | thread_id: " << this_thread::get_id();
+			if (context.print_thread_info) {
+				ostringstream ss;
+				ss.setf(ios::fixed);
+				ss << setprecision(0);
+				ss << "expression_id: " << self << " | thread_id: " << this_thread::get_id();
 
-			auto end = chrono::high_resolution_clock::now();
-			auto diff1 = start - time_ppp_start;
-			auto diff2 = end - time_ppp_start;
-			auto diff3 = end - start;
-			ss << " | start: " << chrono::duration<double, chrono::microseconds::period>(diff1).count() << " us";
-			ss << " | end: " << chrono::duration<double, chrono::microseconds::period>(diff2).count() << " us";
-			ss << " | delta: " << chrono::duration<double, chrono::microseconds::period>(diff3).count() << " us\n";
-			cout << ss.str() << flush;
+				auto end = chrono::high_resolution_clock::now();
+				auto diff1 = start - time_ppp_start;
+				auto diff2 = end - time_ppp_start;
+				auto diff3 = end - start;
+				ss << " | start: " << chrono::duration<double, chrono::microseconds::period>(diff1).count() << " us";
+				ss << " | end: " << chrono::duration<double, chrono::microseconds::period>(diff2).count() << " us";
+				ss << " | delta: " << chrono::duration<double, chrono::microseconds::period>(diff3).count() << " us\n";
+				cout << ss.str() << flush;
+			}
 			return new_calculators;
 		}
 
-		void bind(expression& rhs, expression& lhs, expression& res)
+		void bind_expr(expression& rhs, expression& lhs, expression& res)
 		{
 			context.exps.at(res.self)->prev.emplace_back(lhs.self);
 			context.exps.at(res.self)->prev.emplace_back(rhs.self);
@@ -173,12 +170,14 @@ public:
 			auto* exp = new expression(context,
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra + rb;
+#ifdef PRINT_OPERATIONS_OF_LAMBDAS
 					ostringstream ss;
 					ss << ra << '+' << rb << '=' << res << '\n';
 					cout << ss.str() << flush;
+#endif
 					return res;
 				}));
-			bind(*this, rhs, *exp);
+			bind_expr(*this, rhs, *exp);
 			return *exp;
 		}
 
@@ -187,12 +186,14 @@ public:
 			auto* exp = new expression(context,
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra - rb;
+#ifdef PRINT_OPERATIONS_OF_LAMBDAS
 					ostringstream ss;
 					ss << ra << '-' << rb << '=' << res << '\n';
 					cout << ss.str() << flush;
+#endif
 					return res;
 				}));
-			bind(*this, rhs, *exp);
+			bind_expr(*this, rhs, *exp);
 			return *exp;
 		}
 
@@ -201,12 +202,14 @@ public:
 			auto* exp = new expression(context,
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra * rb;
+#ifdef PRINT_OPERATIONS_OF_LAMBDAS
 					ostringstream ss;
 					ss << ra << '*' << rb << '=' << res << '\n';
 					cout << ss.str() << flush;
+#endif
 					return res;
 				}));
-			bind(*this, rhs, *exp);
+			bind_expr(*this, rhs, *exp);
 			return *exp;
 		}
 
@@ -215,12 +218,14 @@ public:
 			auto* exp = new expression(context,
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra / rb;
+#ifdef PRINT_OPERATIONS_OF_LAMBDAS
 					ostringstream ss;
 					ss << ra << '/' << rb << '=' << res << '\n';
 					cout << ss.str() << flush;
+#endif
 					return res;
 				}));
-			bind(*this, rhs, *exp);
+			bind_expr(*this, rhs, *exp);
 			return *exp;
 		}
 
@@ -261,35 +266,52 @@ public:
 	}
 };
 
-// void test(double x, size_t n)
-// {
-//     using namespace std;
-//     auto start = chrono::high_resolution_clock::now();
-//     for (size_t k = 0; k < n; ++k)
-//     {
-//         auto at = thread(f1, x);
-//         auto bt = thread(f2, x);
-//         at.join();
-//         bt.join();
-//         x = a + b - a;
-//     }
-//     auto end = chrono::high_resolution_clock::now();
-//     auto diff = end - start;
-//     cout << chrono::duration<double, chrono::seconds::period>(diff).count()
-//     << " s\n"; cout << "x' = " << x << "\n";
-// }
+class for_loop : public ppp {
+	ppp start(size_t a, size_t b, function<void(ppp& p)>)
+	{
+	}
+	auto calculate()
+	{
+		vector<size_t> q;
+		for (auto var : vars) {
+			if (exps.at(var)->is_calculated())
+				q.emplace_back(var);
+		}
+		auto futures = vector<future<vector<size_t>>> {};
+		while (!q.empty()) {
+			// start read-write parallel wrap
+			for (auto id : q) {
+				auto* v = exps.at(id);
+				futures.emplace_back(async(&ppp::base::get_next_exprs, v));
+			}
+			q.clear();
+			// fill next wrap
+			for (auto& fv : futures) {
+				auto vec_id = fv.get();
+				for (auto id : vec_id)
+					q.push_back(id);
+			}
+			futures.clear();
+		}
+	}
+};
 
 int main(int argc, char* argv[])
 {
-	using namespace std;
+	auto start = chrono::high_resolution_clock::now();
 	double x = 1;
 	ppp p;
+	p.print_thread_info=true;
 	auto xp = p.add_variable(x);
 	auto yp = p.add_variable(2.);
+	// p.for_loop_start(1, 5);
 	auto w = (xp + yp) + (yp + yp);
+	// p.for_loop_end();
 	p.calculate();
 	// cout << p.exps.size() << endl;
-	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()
-	// << endl;
+	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()<< endl;
+	auto end = chrono::high_resolution_clock::now();
+	auto diff = end - start;
+	cout << chrono::duration<double, chrono::milliseconds::period>(diff).count() << " ms - total execution time" << endl;
 	return 0;
 }
