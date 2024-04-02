@@ -309,7 +309,7 @@ public:
 		}
 		while (a < b) {
 			g(*this, a);
-			calculate();
+			// calculate();
 
 			a += c;
 			// to support a new scope
@@ -338,7 +338,8 @@ public:
 			for (auto [k, v] : exps) {
 				if (pre_scope.exps.find(k) != pre_scope.exps.end()) {
 					tmp.emplace(k, v);
-				} else {
+				} else if (vars.find(k)==vars.end()){
+					// since vars, created inside loop are already deleted  
 					delete v;
 				}
 			}
@@ -354,17 +355,17 @@ public:
 int main(int argc, char* argv[])
 {
 	auto start = chrono::high_resolution_clock::now();
-	int x = 0;
 	ppp p;
 	p.print_thread_info = true;
-	auto xp = p.add_variable(x);
-	auto yp = p.add_variable(2);
-	auto gamma = p.add_variable(xp);
-	p.for_loop(1, 5, 1,
-		function<void(ppp&, int)>(
-			[&](ppp& pp, int k) {
-				auto w = (xp + yp) + (yp + yp);
-				gamma = gamma + w;
+	auto xp = p.add_variable(1.);
+	auto yp = p.add_variable(5.);
+	auto gamma = p.add_variable(0.);
+	p.for_loop(1., 5., 1.,
+		function<void(ppp&, double)>(
+			[&](ppp& pp, double k) {
+				auto q = pp.add_variable(k);
+				gamma = gamma + q;
+				pp.calculate();
 			}));
 	p.calculate();
 	// cout << p.exps.size() << endl;
