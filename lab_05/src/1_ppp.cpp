@@ -4,6 +4,7 @@
 #include <deque>
 #include <functional>
 #include <future>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <thread>
@@ -16,6 +17,7 @@ class ppp {
 	protected:
 		atomic<bool> _calculated { false };
 		bool rval { false };
+		chrono::system_clock::time_point time_ppp_start { chrono::high_resolution_clock::now() };
 
 	public:
 		atomic<bool> _to_be_calculated { false };
@@ -125,6 +127,7 @@ public:
 
 		vector<size_t> get_next_exprs()
 		{
+			auto start = chrono::high_resolution_clock::now();
 			vector<size_t> new_calculators;
 			if (!atomic_exchange(&_calculated, true)) {
 				auto ra = static_cast<expression*>(context.exps.at(prev[0]))->result();
@@ -141,6 +144,19 @@ public:
 				if (ready && !atomic_exchange(&next_ex->_to_be_calculated, true))
 					new_calculators.push_back(next_id);
 			}
+			ostringstream ss;
+			ss.setf(ios::fixed);
+			ss << setprecision(0);
+			ss << "expression_id: " << self << " | thread_id: " << this_thread::get_id();
+
+			auto end = chrono::high_resolution_clock::now();
+			auto diff1 = start - time_ppp_start;
+			auto diff2 = end - time_ppp_start;
+			auto diff3 = end - start;
+			ss << " | start: " << chrono::duration<double, chrono::microseconds::period>(diff1).count() << " us";
+			ss << " | end: " << chrono::duration<double, chrono::microseconds::period>(diff2).count() << " us";
+			ss << " | delta: " << chrono::duration<double, chrono::microseconds::period>(diff3).count() << " us\n";
+			cout << ss.str() << flush;
 			return new_calculators;
 		}
 
