@@ -49,7 +49,7 @@ public:
 	size_t aa = 0;
 	unordered_map<size_t, base*> exps;
 	unordered_set<size_t> vars;
-
+	unordered_map<size_t, size_t> overwrite_assignment_storage;
 	auto calculate()
 	{
 		vector<size_t> q;
@@ -114,7 +114,7 @@ public:
 		~expression()
 		{
 		}
-		T result()
+		T result() const
 		{
 			return _result;
 		}
@@ -161,15 +161,30 @@ public:
 			return new_calculators;
 		}
 
-		void bind_expr(expression& rhs, expression& lhs, expression& res)
+		static void bind_expr(const expression& rhs, const expression& lhs, const expression& res)
 		{
-			context.exps.at(res.self)->prev.emplace_back(lhs.self);
-			context.exps.at(res.self)->prev.emplace_back(rhs.self);
-			context.exps.at(lhs.self)->next.emplace_back(res.self);
-			context.exps.at(rhs.self)->next.emplace_back(res.self);
+			rhs.context.exps.at(res.self)->prev.emplace_back(lhs.self);
+			rhs.context.exps.at(res.self)->prev.emplace_back(rhs.self);
+			rhs.context.exps.at(lhs.self)->next.emplace_back(res.self);
+			rhs.context.exps.at(rhs.self)->next.emplace_back(res.self);
 		}
 
-		auto operator+(expression& rhs)
+		expression& operator=(const expression& other)
+		{
+			if (other.self == self)
+				return *this;
+			auto* exp = new expression(context, function<T(T, T)>([](T ra, T rb) -> T {
+				return ra;
+			}));
+			bind_expr(other, other, *exp);
+			if (find(other.prev.begin(), other.prev.end(), self) != other.prev.end()) {
+				context.overwrite_assignment_storage.emplace(self, other.self);
+			}
+			return *exp;
+		}
+
+		auto
+		operator+(expression& rhs)
 		{
 			auto* exp = new expression(context,
 				function<T(T, T)>([](T ra, T rb) {
@@ -253,7 +268,7 @@ public:
 		base* deep_copy() override
 		{
 			auto* exp = new expression(*this);
-			return exp;
+			return static_cast<base*>(exp);
 		}
 	};
 
@@ -269,19 +284,25 @@ public:
 		return exp;
 	}
 	template <typename T>
-	expression<T> add_variable(const expression<T> exp)
+	expression<T> add_variable(const expression<T> other)
 	{
+		auto exp = expression(*this, function<T(T, T)>([](T ra, T rb) -> T {
+			return ra;
+		}));
 		vars.insert(exp.self);
+		exp.bind_expr(other, other, exp);
 		return exp;
 	}
 
 	template <typename T>
 	void for_loop(T a, T b, T c, function<void(ppp&, T)> g)
 	{
+		calculate();
 		// deep copy of state to support a new scope
 		ppp pre_scope;
 		pre_scope.aa = aa;
 		pre_scope.print_thread_info = print_thread_info;
+		pre_scope.overwrite_assignment_storage = overwrite_assignment_storage;
 		pre_scope.vars.insert(vars.begin(), vars.end());
 		for (auto [k, v] : exps) {
 			pre_scope.exps.emplace(k, v->deep_copy());
@@ -291,15 +312,28 @@ public:
 			calculate();
 
 			a += c;
-			// revert state back to pre to support a new scope
-			// update state of exps
+			// to support a new scope
+			// revert state back to pre
 			for (auto [k, v] : pre_scope.exps) {
-				v->copy_result_from(exps.at(k));
+				// get results from inner scope
+				// take overwrite_assignment_storage into account
+				auto it = overwrite_assignment_storage.find(k);
+				if (it != overwrite_assignment_storage.end()) {
+					// find last overwrite of id k
+					while (overwrite_assignment_storage.find(it->second) != overwrite_assignment_storage.end())
+						it = overwrite_assignment_storage.find(it->second);
+					// pull result into outer scope
+					v->copy_result_from(exps.at(it->second));
+				} else {
+					v->copy_result_from(exps.at(k));
+				}
 			}
-			// revert to initial state
+			// revert global state to initial state partially (only inner expression states)
 			for (auto [k, v] : pre_scope.exps) {
 				*exps.at(k) = *v;
+				exps.at(k)->copy_result_from(v);
 			}
+			// revert global state to initial state completely (remove newly added expressions)
 			decltype(exps) tmp;
 			for (auto [k, v] : exps) {
 				if (pre_scope.exps.find(k) != pre_scope.exps.end()) {
@@ -308,9 +342,11 @@ public:
 					delete v;
 				}
 			}
+			exps = tmp;
 			vars = pre_scope.vars;
 			aa = pre_scope.aa;
 			print_thread_info = pre_scope.print_thread_info;
+			overwrite_assignment_storage = pre_scope.overwrite_assignment_storage;
 		}
 	}
 };
@@ -318,15 +354,17 @@ public:
 int main(int argc, char* argv[])
 {
 	auto start = chrono::high_resolution_clock::now();
-	double x = 1;
+	int x = 0;
 	ppp p;
 	p.print_thread_info = true;
 	auto xp = p.add_variable(x);
-	auto yp = p.add_variable(2.);
+	auto yp = p.add_variable(2);
+	auto gamma = p.add_variable(xp);
 	p.for_loop(1, 5, 1,
 		function<void(ppp&, int)>(
 			[&](ppp& pp, int k) {
 				auto w = (xp + yp) + (yp + yp);
+				gamma = gamma + w;
 			}));
 	p.calculate();
 	// cout << p.exps.size() << endl;
