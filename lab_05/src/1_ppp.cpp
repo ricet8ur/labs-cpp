@@ -12,37 +12,25 @@
 #include <unordered_set>
 using namespace std;
 
-// #define PRINT_OPERATIONS_OF_LAMBDAS
+#define PRINT_OPERATIONS_OF_LAMBDAS
 
 class ppp {
 public:
 	bool print_thread_info { false };
+	chrono::system_clock::time_point time_ppp_start { chrono::high_resolution_clock::now() };
 	class base {
 	protected:
 		bool _calculated { false };
 		bool rval { false };
-		chrono::system_clock::time_point time_ppp_start { chrono::high_resolution_clock::now() };
 
 	public:
 		size_t self;
 		vector<size_t> next;
 		vector<size_t> prev;
-		base(size_t id)
-			: self { id }
-			, next {}
-			, prev {}
-		{
-		}
 		base()
 			: self {}
 			, next {}
 			, prev {}
-		{
-		}
-		base(const base& other)
-			: self { other.self }
-			, next { other.next }
-			, prev { other.prev }
 		{
 		}
 
@@ -50,6 +38,8 @@ public:
 		{
 			return _calculated;
 		}
+		virtual void copy_result_from(base* other) = 0;
+		virtual base* deep_copy() = 0;
 		virtual vector<size_t> get_next_exprs() = 0;
 		virtual ~base()
 		{
@@ -67,20 +57,26 @@ public:
 			if (exps.at(var)->is_calculated())
 				q.emplace_back(var);
 		}
+
 		auto futures = vector<future<vector<size_t>>> {};
 		while (!q.empty()) {
 			// start read-write parallel wrap
 			for (auto id : q) {
+
 				auto* v = exps.at(id);
 				futures.emplace_back(async(&base::get_next_exprs, v));
 			}
 			q.clear();
 			// fill next wrap
 			for (auto& fv : futures) {
+				// cout << exps.size() << endl;
 				auto vec_id = fv.get();
+				// cout << exps.size() << endl;
+
 				for (auto id : vec_id)
 					q.push_back(id);
 			}
+
 			futures.clear();
 			sort(q.begin(), q.end());
 			auto last = std::unique(q.begin(), q.end());
@@ -122,8 +118,12 @@ public:
 		{
 			return _result;
 		}
+		void copy_result_from(base* other) override
+		{
+			_result = static_cast<expression*>(other)->result();
+		}
 
-		vector<size_t> get_next_exprs()
+		vector<size_t> get_next_exprs() override
 		{
 			auto start = chrono::high_resolution_clock::now();
 			vector<size_t> new_calculators;
@@ -150,8 +150,8 @@ public:
 				ss << "expression_id: " << self << " | thread_id: " << this_thread::get_id();
 
 				auto end = chrono::high_resolution_clock::now();
-				auto diff1 = start - time_ppp_start;
-				auto diff2 = end - time_ppp_start;
+				auto diff1 = start - context.time_ppp_start;
+				auto diff2 = end - context.time_ppp_start;
 				auto diff3 = end - start;
 				ss << " | start: " << chrono::duration<double, chrono::microseconds::period>(diff1).count() << " us";
 				ss << " | end: " << chrono::duration<double, chrono::microseconds::period>(diff2).count() << " us";
@@ -249,6 +249,12 @@ public:
 		{
 			return *this / rhs;
 		}
+
+		base* deep_copy() override
+		{
+			auto* exp = new expression(*this);
+			return exp;
+		}
 	};
 
 	template <typename T>
@@ -268,37 +274,43 @@ public:
 		vars.insert(exp.self);
 		return exp;
 	}
-};
 
-class for_loop : public ppp {
-	ppp start(size_t a, size_t b, function<void(ppp& p)>)
+	template <typename T>
+	void for_loop(T a, T b, T c, function<void(ppp&, T)> g)
 	{
-	}
-	auto calculate()
-	{
-		vector<size_t> q;
-		for (auto var : vars) {
-			if (exps.at(var)->is_calculated())
-				q.emplace_back(var);
+		// deep copy of state to support a new scope
+		ppp pre_scope;
+		pre_scope.aa = aa;
+		pre_scope.print_thread_info = print_thread_info;
+		pre_scope.vars.insert(vars.begin(), vars.end());
+		for (auto [k, v] : exps) {
+			pre_scope.exps.emplace(k, v->deep_copy());
 		}
-		auto futures = vector<future<vector<size_t>>> {};
-		while (!q.empty()) {
-			// start read-write parallel wrap
-			for (auto id : q) {
-				auto* v = exps.at(id);
-				futures.emplace_back(async(&ppp::base::get_next_exprs, v));
+		while (a < b) {
+			g(*this, a);
+			calculate();
+
+			a += c;
+			// revert state back to pre to support a new scope
+			// update state of exps
+			for (auto [k, v] : pre_scope.exps) {
+				v->copy_result_from(exps.at(k));
 			}
-			q.clear();
-			// fill next wrap
-			for (auto& fv : futures) {
-				auto vec_id = fv.get();
-				for (auto id : vec_id)
-					q.push_back(id);
+			// revert to initial state
+			for (auto [k, v] : pre_scope.exps) {
+				*exps.at(k) = *v;
 			}
-			futures.clear();
-			sort(q.begin(), q.end());
-			auto last = std::unique(q.begin(), q.end());
-			q.erase(last, q.end());
+			decltype(exps) tmp;
+			for (auto [k, v] : exps) {
+				if (pre_scope.exps.find(k) != pre_scope.exps.end()) {
+					tmp.emplace(k, v);
+				} else {
+					delete v;
+				}
+			}
+			vars = pre_scope.vars;
+			aa = pre_scope.aa;
+			print_thread_info = pre_scope.print_thread_info;
 		}
 	}
 };
@@ -311,10 +323,11 @@ int main(int argc, char* argv[])
 	p.print_thread_info = true;
 	auto xp = p.add_variable(x);
 	auto yp = p.add_variable(2.);
-	// p.for_loop_start(1, 5, 1, [&](ppp& w, size_t k){
-		auto w = (xp + yp) + (yp + yp);
-	// });
-	// p.for_loop_end();
+	p.for_loop(1, 5, 1,
+		function<void(ppp&, int)>(
+			[&](ppp& pp, int k) {
+				auto w = (xp + yp) + (yp + yp);
+			}));
 	p.calculate();
 	// cout << p.exps.size() << endl;
 	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()<< endl;
