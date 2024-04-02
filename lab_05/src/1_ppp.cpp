@@ -158,8 +158,8 @@ public:
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra + rb;
 					ostringstream ss;
-					ss << ra << '+' << rb << '=' << res;
-					cout << ss.str() << endl;
+					ss << ra << '+' << rb << '=' << res << '\n';
+					cout << ss.str() << flush;
 					return res;
 				}));
 			bind(*this, rhs, *exp);
@@ -172,8 +172,8 @@ public:
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra - rb;
 					ostringstream ss;
-					ss << ra << '-' << rb << '=' << res;
-					cout << ss.str() << endl;
+					ss << ra << '-' << rb << '=' << res << '\n';
+					cout << ss.str() << flush;
 					return res;
 				}));
 			bind(*this, rhs, *exp);
@@ -186,8 +186,8 @@ public:
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra * rb;
 					ostringstream ss;
-					ss << ra << '*' << rb << '=' << res;
-					cout << ss.str() << endl;
+					ss << ra << '*' << rb << '=' << res << '\n';
+					cout << ss.str() << flush;
 					return res;
 				}));
 			bind(*this, rhs, *exp);
@@ -200,8 +200,8 @@ public:
 				function<T(T, T)>([](T ra, T rb) {
 					const auto res = ra / rb;
 					ostringstream ss;
-					ss << ra << '/' << rb << '=' << res;
-					cout << ss.str() << endl;
+					ss << ra << '/' << rb << '=' << res << '\n';
+					cout << ss.str() << flush;
 					return res;
 				}));
 			bind(*this, rhs, *exp);
