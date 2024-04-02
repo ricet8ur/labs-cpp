@@ -5,25 +5,25 @@
 #include <future>
 #include <iomanip>
 #include <iostream>
+#include <queue>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 using namespace std;
 
-#define PRINT_OPERATIONS_OF_LAMBDAS
+// #define PRINT_OPERATIONS_OF_LAMBDAS
 
 class ppp {
 public:
 	bool print_thread_info { false };
 	class base {
 	protected:
-		atomic<bool> _calculated { false };
+		bool _calculated { false };
 		bool rval { false };
 		chrono::system_clock::time_point time_ppp_start { chrono::high_resolution_clock::now() };
 
 	public:
-		atomic<bool> _to_be_calculated { false };
 		size_t self;
 		vector<size_t> next;
 		vector<size_t> prev;
@@ -48,7 +48,7 @@ public:
 
 		bool is_calculated() const
 		{
-			return _calculated.load();
+			return _calculated;
 		}
 		virtual vector<size_t> get_next_exprs() = 0;
 		virtual ~base()
@@ -82,6 +82,9 @@ public:
 					q.push_back(id);
 			}
 			futures.clear();
+			sort(q.begin(), q.end());
+			auto last = std::unique(q.begin(), q.end());
+			q.erase(last, q.end());
 		}
 	}
 
@@ -97,9 +100,9 @@ public:
 			, f { f }
 			, context { context }
 		{
-			_calculated.store(false);
+			_calculated = false;
 			self = ++context.aa;
-			context.exps.insert(make_pair(self, this));
+			context.exps.emplace(self, this);
 		}
 		expression(ppp& context, function<T(T, T)> f, T result)
 			: base {}
@@ -107,10 +110,10 @@ public:
 			, f { f }
 			, context { context }
 		{
-			_calculated.store(true);
+			_calculated = true;
 			self = ++context.aa;
 
-			context.exps.insert(make_pair(self, this));
+			context.exps.emplace(self, this);
 		}
 		~expression()
 		{
@@ -124,7 +127,8 @@ public:
 		{
 			auto start = chrono::high_resolution_clock::now();
 			vector<size_t> new_calculators;
-			if (!atomic_exchange(&_calculated, true)) {
+			if (!_calculated) {
+				_calculated = true;
 				auto ra = static_cast<expression*>(context.exps.at(prev[0]))->result();
 				auto rb = static_cast<expression*>(context.exps.at(prev[1]))->result();
 				_result = f(ra, rb);
@@ -136,7 +140,7 @@ public:
 				auto nextprev = next_ex->prev;
 				for (size_t pre_id : nextprev)
 					ready = ready && context.exps.at(pre_id)->is_calculated();
-				if (ready && !atomic_exchange(&next_ex->_to_be_calculated, true))
+				if (ready)
 					new_calculators.push_back(next_id);
 			}
 			if (context.print_thread_info) {
@@ -292,6 +296,9 @@ class for_loop : public ppp {
 					q.push_back(id);
 			}
 			futures.clear();
+			sort(q.begin(), q.end());
+			auto last = std::unique(q.begin(), q.end());
+			q.erase(last, q.end());
 		}
 	}
 };
@@ -301,11 +308,12 @@ int main(int argc, char* argv[])
 	auto start = chrono::high_resolution_clock::now();
 	double x = 1;
 	ppp p;
-	p.print_thread_info=true;
+	p.print_thread_info = true;
 	auto xp = p.add_variable(x);
 	auto yp = p.add_variable(2.);
-	// p.for_loop_start(1, 5);
-	auto w = (xp + yp) + (yp + yp);
+	// p.for_loop_start(1, 5, 1, [&](ppp& w, size_t k){
+		auto w = (xp + yp) + (yp + yp);
+	// });
 	// p.for_loop_end();
 	p.calculate();
 	// cout << p.exps.size() << endl;
