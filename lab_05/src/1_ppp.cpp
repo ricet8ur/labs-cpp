@@ -10,6 +10,7 @@
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 using namespace std;
 
 #define PRINT_OPERATIONS_OF_LAMBDAS
@@ -40,7 +41,7 @@ public:
 		}
 		virtual void copy_result_from(base* other) = 0;
 		virtual base* deep_copy() = 0;
-		virtual vector<size_t> get_next_exprs() = 0;
+		virtual vector<size_t> execute() = 0;
 		virtual ~base()
 		{
 		}
@@ -50,6 +51,7 @@ public:
 	unordered_map<size_t, base*> exps;
 	unordered_set<size_t> vars;
 	unordered_map<size_t, size_t> overwrite_assignment_storage;
+	unordered_map<size_t, vector<variant<string, size_t>>> cout_bind_to_expression;
 	auto calculate()
 	{
 		vector<size_t> q;
@@ -64,34 +66,34 @@ public:
 			for (auto id : q) {
 
 				auto* v = exps.at(id);
-				futures.emplace_back(async(&base::get_next_exprs, v));
+				futures.emplace_back(async(&base::execute, v));
 			}
 			q.clear();
 			// fill next wrap
 			for (auto& fv : futures) {
-				// cout << exps.size() << endl;
 				auto vec_id = fv.get();
-				// cout << exps.size() << endl;
-
 				for (auto id : vec_id)
 					q.push_back(id);
 			}
 
 			futures.clear();
 			sort(q.begin(), q.end());
-			auto last = std::unique(q.begin(), q.end());
+			auto last = unique(q.begin(), q.end());
 			q.erase(last, q.end());
 		}
 	}
 
 	template <typename T>
+	using ftype = function<T(ppp&, size_t)>;
+
+	template <typename T>
 	class expression final : public base {
 		T _result;
-		function<T(T, T)> f;
+		ftype<T> f;
 
 	public:
 		ppp& context;
-		expression(ppp& context, function<T(T, T)> f)
+		expression(ppp& context, ftype<T> f)
 			: base {}
 			, f { f }
 			, context { context }
@@ -100,7 +102,7 @@ public:
 			self = ++context.aa;
 			context.exps.emplace(self, this);
 		}
-		expression(ppp& context, function<T(T, T)> f, T result)
+		expression(ppp& context, ftype<T> f, T result)
 			: base {}
 			, _result { result }
 			, f { f }
@@ -123,20 +125,18 @@ public:
 			_result = static_cast<expression*>(other)->result();
 		}
 
-		vector<size_t> get_next_exprs() override
+		vector<size_t> execute() override
 		{
 			auto start = chrono::high_resolution_clock::now();
 			vector<size_t> new_calculators;
 			if (!_calculated) {
 				_calculated = true;
-				auto ra = static_cast<expression*>(context.exps.at(prev[0]))->result();
-				auto rb = static_cast<expression*>(context.exps.at(prev[1]))->result();
-				_result = f(ra, rb);
+				_result = f(context, self);
 			}
 			for (size_t next_id : next) {
 				// check if next expression is ready to be calculated
 				bool ready = true;
-				auto* next_ex = context.exps.at(next_id);
+				const auto* next_ex = context.exps.at(next_id);
 				auto nextprev = next_ex->prev;
 				for (size_t pre_id : nextprev)
 					ready = ready && context.exps.at(pre_id)->is_calculated();
@@ -161,94 +161,100 @@ public:
 			return new_calculators;
 		}
 
-		static void bind_expr(const expression& rhs, const expression& lhs, const expression& res)
+		static void bind_expr(const expression& from, const expression& to)
 		{
-			rhs.context.exps.at(res.self)->prev.emplace_back(lhs.self);
-			rhs.context.exps.at(res.self)->prev.emplace_back(rhs.self);
-			rhs.context.exps.at(lhs.self)->next.emplace_back(res.self);
-			rhs.context.exps.at(rhs.self)->next.emplace_back(res.self);
+			from.context.exps.at(to.self)->prev.emplace_back(from.self);
+			from.context.exps.at(from.self)->next.emplace_back(to.self);
+		}
+		static void bind_expr2(const expression& rhs, const expression& lhs, const expression& res)
+		{
+			bind_expr(lhs, res);
+			bind_expr(rhs, res);
 		}
 
-		expression& operator=(const expression& other)
+		expression operator=(const expression& other)
 		{
 			if (other.self == self)
 				return *this;
-			auto* exp = new expression(context, function<T(T, T)>([](T ra, T rb) -> T {
-				return ra;
-			}));
-			bind_expr(other, other, *exp);
+			auto* exp = new expression(context,
+				ftype<T>([=](ppp& p, size_t id) {
+					return p.exps.at(id)->prev[0];
+				}));
+			bind_expr(other, *exp);
 			if (find(other.prev.begin(), other.prev.end(), self) != other.prev.end()) {
 				context.overwrite_assignment_storage.emplace(self, other.self);
 			}
 			return *exp;
 		}
 
-		auto
-		operator+(expression& rhs)
+		auto* generic_binary_operator(expression& rhs, function<T(T, T)> f)
 		{
 			auto* exp = new expression(context,
-				function<T(T, T)>([](T ra, T rb) {
-					const auto res = ra + rb;
-#ifdef PRINT_OPERATIONS_OF_LAMBDAS
-					ostringstream ss;
-					ss << ra << '+' << rb << '=' << res << '\n';
-					cout << ss.str() << flush;
-#endif
+				ftype<T>([=](ppp& p, size_t id) {
+					const auto& prev = p.exps.at(id)->prev;
+					const auto ra = static_cast<expression*>(p.exps.at(prev[0]))->result();
+					const auto rb = static_cast<expression*>(p.exps.at(prev[1]))->result();
+					const auto res = f(ra, rb);
 					return res;
 				}));
-			bind_expr(*this, rhs, *exp);
-			return *exp;
+			bind_expr2(*this, rhs, *exp);
+			return exp;
+		}
+
+		auto operator+(expression& rhs)
+		{
+			return *generic_binary_operator(rhs, [](T a, T b) {
+				const auto res = a + b;
+#ifdef PRINT_OPERATIONS_OF_LAMBDAS
+				ostringstream ss;
+				ss << a << '+' << b << '=' << res << '\n';
+				cout << ss.str() << flush;
+#endif
+				return res;
+			});
 		}
 
 		auto operator-(expression& rhs)
 		{
-			auto* exp = new expression(context,
-				function<T(T, T)>([](T ra, T rb) {
-					const auto res = ra - rb;
+			return *generic_binary_operator(rhs, [](T a, T b) {
+				const auto res = a - b;
 #ifdef PRINT_OPERATIONS_OF_LAMBDAS
-					ostringstream ss;
-					ss << ra << '-' << rb << '=' << res << '\n';
-					cout << ss.str() << flush;
+				ostringstream ss;
+				ss << a << '-' << b << '=' << res << '\n';
+				cout << ss.str() << flush;
 #endif
-					return res;
-				}));
-			bind_expr(*this, rhs, *exp);
-			return *exp;
+				return res;
+			});
 		}
 
 		auto operator*(expression& rhs)
 		{
-			auto* exp = new expression(context,
-				function<T(T, T)>([](T ra, T rb) {
-					const auto res = ra * rb;
+			return *generic_binary_operator(rhs, [](T a, T b) {
+				const auto res = a * b;
 #ifdef PRINT_OPERATIONS_OF_LAMBDAS
-					ostringstream ss;
-					ss << ra << '*' << rb << '=' << res << '\n';
-					cout << ss.str() << flush;
+				ostringstream ss;
+				ss << a << '*' << b << '=' << res << '\n';
+				cout << ss.str() << flush;
 #endif
-					return res;
-				}));
-			bind_expr(*this, rhs, *exp);
-			return *exp;
+				return res;
+			});
 		}
 
 		auto operator/(expression& rhs)
 		{
-			auto* exp = new expression(context,
-				function<T(T, T)>([](T ra, T rb) {
-					const auto res = ra / rb;
+			return *generic_binary_operator(rhs, [](T a, T b) {
+				const auto res = a / b;
 #ifdef PRINT_OPERATIONS_OF_LAMBDAS
-					ostringstream ss;
-					ss << ra << '/' << rb << '=' << res << '\n';
-					cout << ss.str() << flush;
+				ostringstream ss;
+				ss << a << '/' << b << '=' << res << '\n';
+				cout << ss.str() << flush;
 #endif
-					return res;
-				}));
-			bind_expr(*this, rhs, *exp);
-			return *exp;
+				return res;
+			});
 		}
 
-		auto operator+(expression&& rhs)
+		auto
+		operator+(expression&& rhs)
 		{
 			return *this + rhs;
 		}
@@ -275,23 +281,23 @@ public:
 	template <typename T>
 	expression<T> add_variable(const T t)
 	{
-		auto exp = expression(*this, function<T(T, T)>([](T ra, T rb) -> T {
+		auto* exp = new expression(*this, ftype<T>([](ppp& p, size_t id) {
 			cout << "never call" << endl;
-			return ra;
+			return T {};
 		}),
 			t);
-		vars.insert(exp.self);
-		return exp;
+		vars.insert(exp->self);
+		return *exp;
 	}
 	template <typename T>
-	expression<T> add_variable(const expression<T> other)
+	expression<T> add_variable(const expression<T>& other)
 	{
-		auto exp = expression(*this, function<T(T, T)>([](T ra, T rb) -> T {
-			return ra;
+		auto* exp = new expression(*this, ftype<T>([](ppp& p, size_t id) {
+			return p.exps.at(id)->prev.at(0);
 		}));
-		vars.insert(exp.self);
-		exp.bind_expr(other, other, exp);
-		return exp;
+		vars.insert(exp->self);
+		exp->bind_expr(other, *exp);
+		return *exp;
 	}
 
 	template <typename T>
@@ -338,8 +344,8 @@ public:
 			for (auto [k, v] : exps) {
 				if (pre_scope.exps.find(k) != pre_scope.exps.end()) {
 					tmp.emplace(k, v);
-				} else if (vars.find(k)==vars.end()){
-					// since vars, created inside loop are already deleted  
+				} else if (vars.find(k) == vars.end()) {
+					// since vars, created inside loop are already deleted
 					delete v;
 				}
 			}
@@ -350,6 +356,28 @@ public:
 			overwrite_assignment_storage = pre_scope.overwrite_assignment_storage;
 		}
 	}
+
+	// expression<bool> add_print(initializer_list<base> args)
+	// {
+	// 	vector<size_t> v;
+	// 	for (auto it :args){
+	// 		v.push_back(it.self);
+	// 	}
+	// 	auto exp = expression(*this, function<T(ppp&,size_t self)>([](T ra, T rb) -> T {
+	// 		return ra;
+	// 	}));
+
+	// 	this->cout_bind_to_expression.emplace(exp, v);
+	// 	for(auto element : v){
+	// 		if (const string* pval = get_if<0>(&element))
+	//         	std::cout << "variant value: " << *pval << '\n';
+	//     	else
+	//         	std::cout << "failed to get value!" << '\n';
+	// 	}
+	// 	vars.insert(exp.self);
+	// 	exp.bind_expr2(other, other, exp);
+	// 	return exp;
+	// }
 };
 
 int main(int argc, char* argv[])
@@ -367,7 +395,10 @@ int main(int argc, char* argv[])
 				gamma = gamma + q;
 				pp.calculate();
 			}));
+	// p.cout() << 1;
 	p.calculate();
+	string s = "a";
+	string b = "b";
 	// cout << p.exps.size() << endl;
 	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()<< endl;
 	auto end = chrono::high_resolution_clock::now();
