@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <iomanip>
@@ -39,7 +40,7 @@ public:
 
 		void copy_base_from(base* other)
 		{
-			context = other->context;
+			// context = other->context;
 			self = other->self;
 			next = other->next;
 			prev = other->prev;
@@ -76,6 +77,8 @@ public:
 	unordered_set<size_t> vars;
 	unordered_map<size_t, size_t> overwrite_assignment_storage;
 	unordered_map<size_t, vector<variant<string, size_t>>> cout_bind_to_expression;
+	mutex file_printer_mutex;
+
 	~ppp()
 	{
 		for (auto [k, v] : exps) {
@@ -298,12 +301,12 @@ public:
 		}
 
 		// strings can only be added
-		auto operator-(expression<string>&& rhs) = delete;
-		auto operator-(expression<string>& rhs) = delete;
-		auto operator*(expression<string>&& rhs) = delete;
-		auto operator*(expression<string>& rhs) = delete;
-		auto operator/(expression<string>& rhs) = delete;
-		auto operator/(expression<string>&& rhs) = delete;
+		// auto operator-(expression<basic_string<char>>&& rhs) = delete;
+		// auto operator-(expression<basic_string<char>>& rhs) = delete;
+		// auto operator*(expression<basic_string<char>>&& rhs) = delete;
+		// auto operator*(expression<basic_string<char>>& rhs) = delete;
+		// auto operator/(expression<basic_string<char>>& rhs) = delete;
+		// auto operator/(expression<basic_string<char>>&& rhs) = delete;
 
 		base* deep_copy() override
 		{
@@ -431,6 +434,60 @@ public:
 	{
 		return cout_pprinter(*this);
 	}
+
+	class file_pprinter {
+		vector<size_t> q;
+		ppp& context;
+
+	public:
+		string filename;
+		file_pprinter(ppp& p, const string& filename)
+			: context { p }
+			, q {}
+			, filename { filename }
+		{
+		}
+		~file_pprinter()
+		{
+			finish();
+		}
+		template <typename T>
+		file_pprinter& operator<<(expression<T> t)
+		{
+			q.push_back(t.self);
+			return *this;
+		}
+		void finish()
+		{
+			auto path = context.add_variable(string(filename));
+			auto* exp = new expression<bool>(context, [](ppp& p, size_t id) -> bool {
+				const lock_guard<mutex> lock(p.file_printer_mutex);
+				const auto& prev = p.exps.at(id)->prev;
+				ostringstream ss;
+				bool filename = 1;
+				for (auto pid : prev) {
+					if (filename) {
+						filename = 0;
+						continue;
+					}
+					p.exps.at(pid)->result_to_osstream(ss);
+				}
+				ofstream fout;
+				const auto* path_exp = static_cast<expression<string>*>(p.exps.at(p.exps.at(id)->prev[0]));
+				fout.open(path_exp->result(), ios_base::app);
+				fout << ss.str() << flush;
+				fout.close();
+				return true;
+			});
+			base::bind_expr(path, *exp);
+			for (auto e : q)
+				base::bind_expr(*context.exps.at(e), *exp);
+		}
+	};
+	file_pprinter add_fprinter(const string& filename)
+	{
+		return file_pprinter(*this, filename);
+	}
 };
 
 int main(int argc, char* argv[])
@@ -455,6 +512,10 @@ int main(int argc, char* argv[])
 	string s = "a";
 	string b = "b";
 	p.add_printer() << xp;
+	p.add_fprinter("text.txt") << xp;
+	p.add_fprinter("text2.txt") << xp;
+	p.add_fprinter("text3.txt") << xp;
+	p.add_fprinter("text4.txt") << xp;
 	p.calculate();
 
 	// cout << p.exps.size() << endl;
