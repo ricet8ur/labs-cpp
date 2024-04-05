@@ -16,29 +16,53 @@ using namespace std;
 #define PRINT_OPERATIONS_OF_LAMBDAS
 
 class ppp {
+
 public:
 	bool print_thread_info { false };
 	chrono::system_clock::time_point time_ppp_start { chrono::high_resolution_clock::now() };
 	class base {
 	protected:
 		bool _calculated { false };
-		bool rval { false };
 
 	public:
+		ppp& context;
 		size_t self;
 		vector<size_t> next;
 		vector<size_t> prev;
-		base()
-			: self {}
+		base(ppp& context)
+			: context { context }
+			, self {}
 			, next {}
 			, prev {}
 		{
+		}
+
+		void copy_base_from(base* other)
+		{
+			context = other->context;
+			self = other->self;
+			next = other->next;
+			prev = other->prev;
+			_calculated = other->_calculated;
 		}
 
 		bool is_calculated() const
 		{
 			return _calculated;
 		}
+
+		static void bind_expr(const base& from, const base& to)
+		{
+			from.context.exps.at(to.self)->prev.emplace_back(from.self);
+			from.context.exps.at(from.self)->next.emplace_back(to.self);
+		}
+		static void bind_expr2(const base& lhs, const base& rhs, const base& res)
+		{
+			bind_expr(lhs, res);
+			bind_expr(rhs, res);
+		}
+		virtual void result_to_osstream(ostringstream& ss) = 0;
+
 		virtual void copy_result_from(base* other) = 0;
 		virtual base* deep_copy() = 0;
 		virtual vector<size_t> execute() = 0;
@@ -52,6 +76,13 @@ public:
 	unordered_set<size_t> vars;
 	unordered_map<size_t, size_t> overwrite_assignment_storage;
 	unordered_map<size_t, vector<variant<string, size_t>>> cout_bind_to_expression;
+	~ppp()
+	{
+		for (auto [k, v] : exps) {
+			delete v;
+		}
+	}
+
 	auto calculate()
 	{
 		vector<size_t> q;
@@ -92,21 +123,18 @@ public:
 		ftype<T> f;
 
 	public:
-		ppp& context;
 		expression(ppp& context, ftype<T> f)
-			: base {}
+			: base { context }
 			, f { f }
-			, context { context }
 		{
 			_calculated = false;
 			self = ++context.aa;
 			context.exps.emplace(self, this);
 		}
 		expression(ppp& context, ftype<T> f, T result)
-			: base {}
+			: base { context }
 			, _result { result }
 			, f { f }
-			, context { context }
 		{
 			_calculated = true;
 			self = ++context.aa;
@@ -123,6 +151,11 @@ public:
 		void copy_result_from(base* other) override
 		{
 			_result = static_cast<expression*>(other)->result();
+		}
+
+		void result_to_osstream(ostringstream& ss) override
+		{
+			ss << result();
 		}
 
 		vector<size_t> execute() override
@@ -161,30 +194,23 @@ public:
 			return new_calculators;
 		}
 
-		static void bind_expr(const expression& from, const expression& to)
-		{
-			from.context.exps.at(to.self)->prev.emplace_back(from.self);
-			from.context.exps.at(from.self)->next.emplace_back(to.self);
-		}
-		static void bind_expr2(const expression& rhs, const expression& lhs, const expression& res)
-		{
-			bind_expr(lhs, res);
-			bind_expr(rhs, res);
-		}
-
 		expression operator=(const expression& other)
 		{
 			if (other.self == self)
 				return *this;
-			auto* exp = new expression(context,
-				ftype<T>([=](ppp& p, size_t id) {
-					return p.exps.at(id)->prev[0];
-				}));
-			bind_expr(other, *exp);
+
 			if (find(other.prev.begin(), other.prev.end(), self) != other.prev.end()) {
 				context.overwrite_assignment_storage.emplace(self, other.self);
 			}
-			return *exp;
+
+			auto* exp = new expression(context,
+				ftype<T>([=](ppp& p, size_t id) {
+					return static_cast<expression*>(p.exps.at(p.exps.at(id)->prev[0]))->result();
+				}));
+			bind_expr(other, *exp);
+			// this->copy_base_from(exp);
+			// <- error on closure capture
+			return *this;
 		}
 
 		auto* generic_binary_operator(expression& rhs, function<T(T, T)> f)
@@ -271,6 +297,14 @@ public:
 			return *this / rhs;
 		}
 
+		// strings can only be added
+		auto operator-(expression<string>&& rhs) = delete;
+		auto operator-(expression<string>& rhs) = delete;
+		auto operator*(expression<string>&& rhs) = delete;
+		auto operator*(expression<string>& rhs) = delete;
+		auto operator/(expression<string>& rhs) = delete;
+		auto operator/(expression<string>&& rhs) = delete;
+
 		base* deep_copy() override
 		{
 			auto* exp = new expression(*this);
@@ -336,7 +370,8 @@ public:
 			}
 			// revert global state to initial state partially (only inner expression states)
 			for (auto [k, v] : pre_scope.exps) {
-				*exps.at(k) = *v;
+				// auto & it = exps.at(k);
+				exps.at(k)->copy_base_from(v);
 				exps.at(k)->copy_result_from(v);
 			}
 			// revert global state to initial state completely (remove newly added expressions)
@@ -357,27 +392,45 @@ public:
 		}
 	}
 
-	// expression<bool> add_print(initializer_list<base> args)
-	// {
-	// 	vector<size_t> v;
-	// 	for (auto it :args){
-	// 		v.push_back(it.self);
-	// 	}
-	// 	auto exp = expression(*this, function<T(ppp&,size_t self)>([](T ra, T rb) -> T {
-	// 		return ra;
-	// 	}));
+	class cout_pprinter {
+		vector<size_t> q;
+		ppp& context;
 
-	// 	this->cout_bind_to_expression.emplace(exp, v);
-	// 	for(auto element : v){
-	// 		if (const string* pval = get_if<0>(&element))
-	//         	std::cout << "variant value: " << *pval << '\n';
-	//     	else
-	//         	std::cout << "failed to get value!" << '\n';
-	// 	}
-	// 	vars.insert(exp.self);
-	// 	exp.bind_expr2(other, other, exp);
-	// 	return exp;
-	// }
+	public:
+		cout_pprinter(ppp& p)
+			: context { p }
+			, q {}
+		{
+		}
+		~cout_pprinter()
+		{
+			finish();
+		}
+		template <typename T>
+		cout_pprinter& operator<<(expression<T> t)
+		{
+			q.push_back(t.self);
+			return *this;
+		}
+		void finish()
+		{
+			auto* exp = new expression<bool>(context, [](ppp& p, size_t id) -> bool {
+				const auto& prev = p.exps.at(id)->prev;
+				ostringstream ss;
+				for (auto pid : prev) {
+					p.exps.at(pid)->result_to_osstream(ss);
+				}
+				cout << ss.str() << flush;
+				return true;
+			});
+			for (auto e : q)
+				base::bind_expr(*context.exps.at(e), *exp);
+		}
+	};
+	cout_pprinter add_printer()
+	{
+		return cout_pprinter(*this);
+	}
 };
 
 int main(int argc, char* argv[])
@@ -393,12 +446,17 @@ int main(int argc, char* argv[])
 			[&](ppp& pp, double k) {
 				auto q = pp.add_variable(k);
 				gamma = gamma + q;
+				p.add_printer() << gamma << pp.add_variable(" test_string\n");
+
 				pp.calculate();
 			}));
 	// p.cout() << 1;
 	p.calculate();
 	string s = "a";
 	string b = "b";
+	p.add_printer() << xp;
+	p.calculate();
+
 	// cout << p.exps.size() << endl;
 	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()<< endl;
 	auto end = chrono::high_resolution_clock::now();
