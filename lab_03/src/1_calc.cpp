@@ -3,6 +3,40 @@
 #include <cassert>
 #include <limits>
 
+
+
+// precision bound
+constexpr double eps = 1e-14;
+
+double my_div(double a, double b){
+    if(b==0.||b==-0.){
+        if (a==0.||a==-0.){
+            return std::numeric_limits<double>::quiet_NaN(); // since no convergence
+        }
+        return a*(b==0.?1:-1)*std::numeric_limits<double>::infinity();
+    }
+    auto negative = (a>0.)^(b>0.);
+    // find inverse of b
+    a = a>0.? a:-a;
+    b = b>0.? b:-b;
+    auto pa = 0.;
+    auto pb = std::numeric_limits<double>::max();
+    double c;
+    while(pb-pa>eps*pa){
+        c =pa+ (pb-pa)*0.5;
+        if(c*b<1.)
+            pa=c;
+        else
+            pb=c;
+    }
+    return negative? -a*c:a*c; 
+}
+
+
+int my_div(int a, int b){
+    return int(my_div(double(a),double(b)));
+}
+
 // pow(double, int)
 double constexpr my_pow(double a, int n)
 {
@@ -15,20 +49,18 @@ double constexpr my_pow(double a, int n)
 
     if (n > 0)
     {
-        auto part = my_pow(a, n / 2);
+        auto part = my_pow(a, my_div(n,2));
         if (n % 2 == 0)
             return part * part;
         else
             return part * part * a;
     }
     else
-        return 1 / my_pow(a, -n);
+        return my_div(1., my_pow(a, -n));
 }
 
 // pow(double, double)
 
-// precision bound
-constexpr double eps = 1e-14;
 // iteration bound
 constexpr size_t K = 100;
 // reduction bound
@@ -40,7 +72,7 @@ constexpr double B = 0.3;
 size_t constexpr ln_iterations_count()
 {
     int n = 1;
-    while (my_pow(B, n + 1) / (n + 1) > eps)
+    while (my_div(my_pow(B, n + 1), (n + 1.)) > eps)
     {
         ++n;
         if (n > K)
@@ -63,7 +95,7 @@ double ln_taylor(double x)
     for (size_t k = 2; k < ln_iterations_count(); ++k)
     {
         a_k = -a_k * x;
-        y += a_k / k;
+        y += my_div(a_k, double(k));
     }
     return y;
 }
@@ -72,12 +104,12 @@ double my_sqrt(double x)
 {
     assert((x >= 0.) && "x < 0 when calling my_sqrt(x)");
 
-    double r = x / 2; // root
+    double r = my_div(x, 2.); // root
     for (size_t k = 0; k < K; ++k)
     {
         if (r * r - x < eps && r * r - x > -eps)
             break;
-        r = (r + x / r) / 2;
+        r = my_div((r + my_div(x, r)),  2.);
     }
     return r;
 }
@@ -88,7 +120,7 @@ double my_ln(double x)
     if (x < 0.)
         return std::numeric_limits<double>::quiet_NaN();
     if (x < 1)
-        return -my_ln(1 / x);
+        return -my_ln(my_div(1., x));
 
     // reduction
     int n = 0;
@@ -125,7 +157,7 @@ double exp_taylor(double x)
     auto y = 1.; // exp value
     for (size_t k = 1; k < exp_iterations_count(); ++k)
     {
-        a_k *= x / k;
+        a_k *= my_div(x, k);
         y += a_k;
     }
     return y;
@@ -134,11 +166,11 @@ double exp_taylor(double x)
 // taylor + argument reduction
 double my_pow(double a, double b)
 {
-    if (double(int(b)) == b)
-        return my_pow(a, int(b));
     // by def
     if (a < 0.)
         a = -a;
+    if (double(int(b)) == b)
+        return my_pow(a, int(b));
     if (a == 0.)
         return b == 0. ? 1 : 0;
     // a > 0.
@@ -147,7 +179,7 @@ double my_pow(double a, double b)
     //        = 2^z exp(r)
     auto x = b * my_ln(a);
     auto c = my_ln(2);
-    auto z = int(x / c);
+    auto z = int(my_div(x, c));
     auto r = x - z * c;
 
     return my_pow(2, z) * exp_taylor(r);
