@@ -76,7 +76,7 @@ public:
 	unordered_map<size_t, base*> exps;
 	unordered_set<size_t> vars;
 	unordered_map<size_t, size_t> overwrite_assignment_storage;
-	unordered_map<size_t, vector<variant<string, size_t>>> cout_bind_to_expression;
+	// unordered_map<size_t, vector<variant<string, size_t>>> cout_bind_to_expression;
 	mutex file_printer_mutex;
 
 	~ppp()
@@ -340,59 +340,15 @@ public:
 	template <typename T>
 	void for_loop(T a, T b, T c, function<void(ppp&, T)> g)
 	{
-		calculate();
-		// deep copy of state to support a new scope
-		ppp pre_scope;
-		pre_scope.aa = aa;
-		pre_scope.print_thread_info = print_thread_info;
-		pre_scope.overwrite_assignment_storage = overwrite_assignment_storage;
-		pre_scope.vars.insert(vars.begin(), vars.end());
-		for (auto [k, v] : exps) {
-			pre_scope.exps.emplace(k, v->deep_copy());
-		}
-		while (a < b) {
-			g(*this, a);
-			// calculate();
-
-			a += c;
-			// to support a new scope
-			// revert state back to pre
-			for (auto [k, v] : pre_scope.exps) {
-				// get results from inner scope
-				// take overwrite_assignment_storage into account
-				auto it = overwrite_assignment_storage.find(k);
-				if (it != overwrite_assignment_storage.end()) {
-					// find last overwrite of id k
-					while (overwrite_assignment_storage.find(it->second) != overwrite_assignment_storage.end())
-						it = overwrite_assignment_storage.find(it->second);
-					// pull result into outer scope
-					v->copy_result_from(exps.at(it->second));
-				} else {
-					v->copy_result_from(exps.at(k));
-				}
-			}
-			// revert global state to initial state partially (only inner expression states)
-			for (auto [k, v] : pre_scope.exps) {
-				// auto & it = exps.at(k);
-				exps.at(k)->copy_base_from(v);
-				exps.at(k)->copy_result_from(v);
-			}
-			// revert global state to initial state completely (remove newly added expressions)
-			decltype(exps) tmp;
-			for (auto [k, v] : exps) {
-				if (pre_scope.exps.find(k) != pre_scope.exps.end()) {
-					tmp.emplace(k, v);
-				} else if (vars.find(k) == vars.end()) {
-					// since vars, created inside loop are already deleted
-					delete v;
-				}
-			}
-			exps = tmp;
-			vars = pre_scope.vars;
-			aa = pre_scope.aa;
-			print_thread_info = pre_scope.print_thread_info;
-			overwrite_assignment_storage = pre_scope.overwrite_assignment_storage;
-		}
+		// limit the repeat count:
+		size_t limit = size_t(1e9);
+		size_t counter = 0;
+		while(a<b){
+			g(*this,c);
+			a+=c;
+			++counter;
+			if (counter>limit)break;
+		}	
 	}
 
 	class cout_pprinter {
@@ -489,6 +445,21 @@ public:
 		return file_pprinter(*this, filename);
 	}
 };
+
+
+// example
+// a <- 0;
+// q <- 0.;
+// [w<~1:3:5]{w <-a+q;"f";print('a',"beta",w); file_print<"file.txt">('b',"test",a);}
+// print(w);
+//#endppp;
+
+// returns success
+bool ppp_interpreter(string program_code){
+	
+	
+	return true;
+}
 
 int main(int argc, char* argv[])
 {
