@@ -343,12 +343,13 @@ public:
 		// limit the repeat count:
 		size_t limit = size_t(1e9);
 		size_t counter = 0;
-		while(a<b){
-			g(*this,c);
-			a+=c;
+		while (a < b) {
+			g(*this, c);
+			a += c;
 			++counter;
-			if (counter>limit)break;
-		}	
+			if (counter > limit)
+				break;
+		}
 	}
 
 	class cout_pprinter {
@@ -446,51 +447,73 @@ public:
 	}
 };
 
-
+// support ppp usage via defines
+#define start_ppp ppp p;
+#define end_ppp p.calculate();
+#define var(v) p.add_variable((v));
+#define start_pfor(varname, a, b, c) p.for_loop(a, b, c,function<void(ppp&, decltype((a)))>([&](ppp& p, decltype(a) varname) {
+#define end_pfor }));
+#define pcout p.add_printer()
+#define pfout(filename) p.add_fprinter((filename))
 // example
+
 // a <- 0;
 // q <- 0.;
 // [w<~1:3:5]{w <-a+q;"f";print('a',"beta",w); file_print<"file.txt">('b',"test",a);}
 // print(w);
-//#endppp;
+// #endppp;
 
 // returns success
-bool ppp_interpreter(string program_code){
-	
-	
+bool ppp_interpreter(string program_code)
+{
+
 	return true;
 }
 
 int main(int argc, char* argv[])
 {
 	auto start = chrono::high_resolution_clock::now();
-	ppp p;
-	p.print_thread_info = true;
-	auto xp = p.add_variable(1.);
-	auto yp = p.add_variable(5.);
-	auto gamma = p.add_variable(0.);
-	p.for_loop(1., 5., 1.,
-		function<void(ppp&, double)>(
-			[&](ppp& pp, double k) {
-				auto q = pp.add_variable(k);
-				gamma = gamma + q;
-				p.add_printer() << gamma << pp.add_variable(" test_string\n");
+	{
+		ppp p;
+		p.print_thread_info = true;
+		auto xp = p.add_variable(1.);
+		auto yp = p.add_variable(5.);
+		auto gamma = p.add_variable(0.);
+		p.for_loop(1., 5., 1.,
+			function<void(ppp&, double)>(
+				[&](ppp& pp, double k) {
+					auto q = pp.add_variable(k);
+					gamma = gamma + q;
+					p.add_printer() << gamma << pp.add_variable(" test_string\n");
 
-				pp.calculate();
-			}));
-	// p.cout() << 1;
-	p.calculate();
-	string s = "a";
-	string b = "b";
-	p.add_printer() << xp;
-	p.add_fprinter("text.txt") << xp;
-	p.add_fprinter("text2.txt") << xp;
-	p.add_fprinter("text3.txt") << xp;
-	p.add_fprinter("text4.txt") << xp;
-	p.calculate();
+					pp.calculate();
+				}));
+		// p.cout() << 1;
+		p.calculate();
+		string s = "a";
+		string b = "b";
+		p.add_printer() << xp;
+		p.add_fprinter("text.txt") << xp;
+		p.add_fprinter("text2.txt") << xp;
+		p.add_fprinter("text3.txt") << xp;
+		p.add_fprinter("text4.txt") << xp;
+		p.calculate();
+	}
 
-	// cout << p.exps.size() << endl;
-	// cout << static_cast<ppp::expression<double> *>(p.exps.at(4))->result()<< endl;
+	// test defines
+	{
+		start_ppp
+		auto a = var(1.)
+		auto b = var(1.)
+		start_pfor(k,0,10,1)
+			auto q = a;
+			a=b;
+			b=q+a;
+		end_pfor
+		pcout << a;
+		pfout("fibonacci.out") << a;
+		end_ppp
+	}
 	auto end = chrono::high_resolution_clock::now();
 	auto diff = end - start;
 	cout << chrono::duration<double, chrono::milliseconds::period>(diff).count() << " ms - total execution time" << endl;
