@@ -90,9 +90,9 @@ public:
 	auto calculate()
 	{
 		vector<size_t> q;
-		for (auto var : vars) {
-			if (exps.at(var)->is_calculated())
-				q.emplace_back(var);
+		for (auto v : exps) {
+			if (v.second->is_calculated())
+				q.emplace_back(v.first);
 		}
 
 		auto futures = vector<future<deque<size_t>>> {};
@@ -123,8 +123,35 @@ public:
 				for (auto idx : it->prev)
 					if (!exps.at(idx)->is_calculated())
 						return false;
+				// check if already calculated:
+				if (it->is_calculated()) {
+					return false;
+				}
 				return true;
 			});
+		}
+		// free calculated expressions that are not variables
+		auto k_to_delete = vector<size_t> {};
+		for (auto [k, v] : exps) {
+			bool is_var = vars.find(k) != vars.end();
+			if (!is_var) {
+				assert(v->is_calculated());
+				auto& prev = v->prev;
+				auto& next = v->next;
+				for (auto n : next) {
+					auto& np = exps.at(n)->prev;
+					np.erase(find(begin(np), end(np), k));
+				}
+				for (auto p : prev) {
+					auto& pn = exps.at(p)->next;
+					pn.erase(find(begin(pn), end(pn), k));
+				}
+				delete v;
+				k_to_delete.push_back(k);
+			}
+		}
+		for (auto k : k_to_delete) {
+			exps.erase(k);
 		}
 	}
 
@@ -156,21 +183,50 @@ public:
 			context.exps.emplace(self, this);
 		}
 		// rule of 3
-		expression(expression&other) = default;
-		// expression(expression& other):
-		// base{other.context},
-		// f{ftype<T>([](ppp& p, size_t id) {
+		expression(expression& other) = default;
+		// expression(expression& other)
+		// 	: base { other.context }
+		// 	, f { ftype<T>([](ppp& p, size_t id) {
 		// 		const auto& prev = p.exps.at(id)->prev;
 		// 		assert(!prev.empty());
 		// 		const auto iter_last_calculated = prev.begin();
 		// 		const auto* last_computed = p.exps.at(*iter_last_calculated);
 		// 		const auto res = static_cast<const expression<T>*>(last_computed)->result();
 		// 		return res;
-		// 	})}
+		// 	}) }
 		// {
 		// 	_is_calculated = false;
 		// 	self = ++context.aa;
 		// 	context.exps.emplace(self, this);
+
+		// 	// // assignment expression
+		// 	// auto* exp = new expression(
+		// 	// 	other.context,
+		// 	// 	ftype<T>([](ppp& p, size_t id) {
+		// 	// 		const auto& prev = p.exps.at(id)->prev;
+		// 	// 		assert(!prev.empty());
+		// 	// 		const auto iter_last_calculated = prev.begin();
+		// 	// 		const auto* last_computed = p.exps.at(*iter_last_calculated);
+		// 	// 		const auto res = static_cast<const expression<T>*>(last_computed)->result();
+		// 	// 		return res;
+		// 	// 	}));
+
+		// 	base::bind_expr(other, *this);
+		// 	context.vars.insert(this->self);
+		// }
+		expression& operator=(const expression& other) = default;
+		// expression& operator=(const expression& other)
+		// {
+		// 	// if (other.self == self)
+		// 	// return *this;
+
+		// 	// if (find(other.prev.begin(), other.prev.end(), self) != other.prev.end()) {
+		// 	// 	context.overwrite_assignment_storage.emplace(self, other.self);
+		// 	// }
+		// 	// auto* exp = new expression(context,
+		// 	// 	ftype<T>([=](ppp& p, size_t id) {
+		// 	// 		return static_cast<expression*>(p.exps.at(p.exps.at(id)->prev[0]))->result();
+		// 	// 	}));
 
 		// 	// assignment expression
 		// 	auto* exp = new expression(
@@ -184,41 +240,24 @@ public:
 		// 			return res;
 		// 		}));
 
-		// 	base::bind_expr(*exp, *this);
-		// 	context.vars.insert(this->self);
+		// 	base::bind_expr(other, *exp);
+		// 	context.vars.insert(exp->self);
+
+		// 	context.vars.erase(self);
+		// 	// context.vars.insert(other.self);
+		// 	// copy
+		// 	// this->copy_base_from(exp);
+		// 	// _result = exp._result;
+		// 	f = exp->f;
+		// 	return *this;
 		// }
-		expression operator=(const expression& other)
-		{
-			// if (other.self == self)
-			// return *this;
-
-			// if (find(other.prev.begin(), other.prev.end(), self) != other.prev.end()) {
-			// 	context.overwrite_assignment_storage.emplace(self, other.self);
-			// }
-			// auto* exp = new expression(context,
-			// 	ftype<T>([=](ppp& p, size_t id) {
-			// 		return static_cast<expression*>(p.exps.at(p.exps.at(id)->prev[0]))->result();
-			// 	}));
-
-			// bind_expr(other, *exp);
-			// this->copy_base_from(exp);
-			// <- error on closure capture
-
-			// this->prev.push_back(other.self);
-			// return *this;
-
-			context.vars.erase(self);
-			context.vars.insert(other.self);
-			// copy
-			this->copy_base_from(&other);
-			_result = other._result;
-			f = other.f;
-			return *this;
-		}
 		~expression()
 		{
 		}
 		// ! rule of 3
+		// expression(expression&& other) = default;
+		// expression& operator=(expression&& other) = default;
+
 		T result() const
 		{
 			return _result;
@@ -236,7 +275,10 @@ public:
 		deque<size_t> execute() override
 		{
 			auto start = chrono::high_resolution_clock::now();
-			_result = f(context, self);
+			if (!_is_calculated) {
+				_result = f(context, self);
+				_is_calculated = true;
+			}
 			if (context.print_thread_info) {
 				ostringstream ss;
 				ss.setf(ios::fixed);
@@ -257,13 +299,8 @@ public:
 
 		static auto generic_binary_operator(expression& lhs, expression& rhs, function<T(T, T)> f)
 		{
-			// unwrap var_wrapper
-
-			auto lhs_expr = static_cast<expression*>(lhs.context.exps.at(lhs.prev.at(0)));
-			auto rhs_expr = static_cast<expression*>(lhs.context.exps.at(lhs.prev.at(0)));
-
 			auto* exp = new expression(
-				lhs_expr.context,
+				lhs.context,
 				ftype<T>([=](ppp& p, size_t id) {
 					const auto& prev = p.exps.at(id)->prev;
 					const auto ra = static_cast<expression*>(p.exps.at(prev[0]))->result();
@@ -271,19 +308,9 @@ public:
 					const auto res = f(ra, rb);
 					return res;
 				}));
-			auto* var_wrapper = new expression(
-				lhs_expr.context,
-				ftype<T>([](ppp& p, size_t id) {
-					const auto& prev = p.exps.at(id)->prev;
-					assert(!prev.empty());
-					// get last calculated expression
-					const auto res = static_cast<expression<T>*>(p.exps.at(prev[0]))->result();
-					return res;
-				}));
-			bind_expr2(lhs_expr, rhs_expr, *exp);
-			bind_expr(*exp, *var_wrapper);
-			lhs_expr.context.vars.insert(var_wrapper->self);
-			return *var_wrapper;
+			bind_expr2(lhs, rhs, *exp);
+			lhs.context.vars.insert(exp->self);
+			return *exp;
 		}
 
 		friend auto operator+(expression& lhs, expression& rhs)
@@ -338,6 +365,23 @@ public:
 			});
 		}
 
+		friend auto operator+(expression&& lhs, expression&& rhs)
+		{
+			lhs.context.vars.erase(lhs.self);
+			lhs.context.vars.erase(rhs.self);
+			return lhs + rhs;
+		}
+		friend auto operator+(expression&& lhs, expression& rhs)
+		{
+			lhs.context.vars.erase(lhs.self);
+			return lhs + rhs;
+		}
+		friend auto operator+(expression& lhs, expression&& rhs)
+		{
+			lhs.context.vars.erase(rhs.self);
+			return lhs + rhs;
+		}
+
 		static expression process_tmp_variable(expression& e)
 		{
 			e.context.vars.erase(e.self);
@@ -372,7 +416,15 @@ public:
 				return T {};
 			}),
 			t);
-		auto* var_wrapper = new expression(
+
+		vars.insert(exp->self);
+		return *exp;
+	}
+
+	template <typename T>
+	expression<T> add_variable(const expression<T>& other)
+	{
+		auto* exp = new expression(
 			*this,
 			ftype<T>([](ppp& p, size_t id) {
 				const auto& prev = p.exps.at(id)->prev;
@@ -382,10 +434,25 @@ public:
 				const auto res = static_cast<const expression<T>*>(last_computed)->result();
 				return res;
 			}));
+		base::bind_expr(other, *exp);
+		vars.insert(exp->self);
+		return *exp;
+	}
 
-		base::bind_expr(*exp, *var_wrapper);
-		vars.insert(var_wrapper->self);
-		return *var_wrapper;
+	template <typename T>
+	void expression_assignment(expression<T>& from, expression<T>& to)
+	{
+		vars.erase(to.self);
+		to.self = from.self;
+		// vars.insert(from.self);
+	}
+
+	template <typename T>
+	void expression_assignment(expression<T>&& from, expression<T>& to)
+	{
+		vars.erase(to.self);
+		to.self = from.self;
+		// vars.insert(from.self);
 	}
 
 	template <typename T>
@@ -395,7 +462,7 @@ public:
 		size_t limit = size_t(1e9);
 		size_t counter = 0;
 		while (a < b) {
-			g(*this, c);
+			g(*this, a);
 			a += c;
 			++counter;
 			if (counter > limit)
@@ -423,6 +490,18 @@ public:
 			q.push_back(t.self);
 			return *this;
 		}
+
+		template <typename T>
+		cout_pprinter& operator<<(T&& t)
+		{
+			auto exp = context.add_variable(t);
+			// not a variable since rvalue
+			// to be erased
+			context.vars.erase(exp.self);
+
+			q.push_back(exp.self);
+			return *this;
+		}
 		void finish()
 		{
 			auto* exp = new expression<bool>(context, [](ppp& p, size_t id) -> bool {
@@ -434,6 +513,7 @@ public:
 				cout << ss.str() << flush;
 				return true;
 			});
+			context.vars.erase(exp->self);
 			for (auto e : q)
 				base::bind_expr(*context.exps.at(e), *exp);
 		}
@@ -465,6 +545,18 @@ public:
 			q.push_back(t.self);
 			return *this;
 		}
+
+		template <typename T>
+		file_pprinter& operator<<(T&& t)
+		{
+			auto exp = context.add_variable(t);
+			// not a variable since rvalue
+			// to be erased
+			context.vars.erase(exp.self);
+
+			q.push_back(exp.self);
+			return *this;
+		}
 		void finish()
 		{
 			auto path = context.add_variable(string(filename));
@@ -488,6 +580,8 @@ public:
 				return true;
 			});
 			base::bind_expr(path, *exp);
+			context.vars.erase(exp->self);
+			context.vars.erase(path.self);
 			for (auto e : q)
 				base::bind_expr(*context.exps.at(e), *exp);
 		}
@@ -502,7 +596,9 @@ public:
 #define start_ppp ppp p;
 #define end_ppp p.calculate();
 #define var(v) p.add_variable((v));
-#define start_pfor(varname, a, b, c) p.for_loop(a, b, c,function<void(ppp&, decltype((a)))>([&](ppp& p, decltype(a) varname) {
+#define assign(from, to) p.expression_assignment((from), (to));
+#define start_pfor(varname, a, b, c) \
+	p.for_loop(a, b, c,function<void(ppp&, decltype((a)))>([&](ppp& p, decltype(a) varname) {
 #define end_pfor \
 	}));
 #define pcout p.add_printer()
@@ -528,44 +624,77 @@ int main(int argc, char* argv[])
 	{
 		ppp p;
 		p.print_thread_info = true;
-		auto x = p.add_variable(1.); // 1. -> var -> x
-		auto y = p.add_variable(5.); // 5. -> var -> y
-		auto a = x; // copy constructor as x -> a
-		a = y; // copy assignment as y -> a
-		// p.for_loop(1., 5., 1.,
-		// 	function<void(ppp&, double)>(
-		// 		[&](ppp& pp, double k) {
-		// 			auto q = pp.add_variable(k);
-		// 			gamma = gamma + q;
-		// 			p.add_printer() << gamma << pp.add_variable(" test_string\n");
+		// auto x = p.add_variable(1.); // 1. -> var -> x
 
-		// 			pp.calculate();
-		// 		}));
+		// auto y = p.add_variable(5.); // 5. -> var -> y
+		// auto a = p.add_variable(x); // copy constructor as x -> a
+		// p.expression_assignment(y, a);
+		// // a = y; // copy assignment as y -> a
+		// // a = a + y;
+		// p.expression_assignment(a + y, a);
+
+		auto gamma = p.add_variable(2.);
+		p.for_loop(1., 5., 1.,
+			function<void(ppp&, double)>(
+				[&](ppp& pp, double k) {
+					auto q = pp.add_variable(k);
+					pp.expression_assignment(gamma + q, gamma);
+					// gamma = gamma + q;
+					pp.add_printer() << gamma << " test_string\n";
+
+					// pp.calculate();
+				}));
+		p.add_printer() << "!for_loop\n";
+		cout << 'a' << endl;
 		p.calculate();
 		string s = "a";
 		string b = "b";
-		// p.add_printer() << xp;
-		// p.add_fprinter("text.txt") << xp;
-		// p.add_fprinter("text2.txt") << xp;
-		// p.add_fprinter("text3.txt") << xp;
-		// p.add_fprinter("text4.txt") << xp;
+		p.add_printer() << s;
+		p.add_fprinter("text.txt") << s;
+		p.add_fprinter("text2.txt") << s;
+		p.add_fprinter("text3.txt") << s;
+		p.add_fprinter("text4.txt") << s;
+		p.add_printer() << "!end\n";
+		cout << 'a' << endl;
+		p.calculate();
+		p.add_printer() << "!end2\n";
+		cout << 'a' << endl;
+		p.calculate();
+		// ! test
+	}
+
+	{
+		// test fibo
+		ppp p;
+		p.print_thread_info = true;
+		auto a = p.add_variable(1.);
+		auto b = p.add_variable(1.);
+		p.for_loop(0., 10., 1.,
+			function<void(ppp&, double)>(
+				[&](ppp& pp, double k) {
+					auto q = pp.add_variable(a);
+					pp.expression_assignment(b, a);
+					pp.expression_assignment(q + a, b);
+				}));
 		p.calculate();
 	}
 
-	// // test defines
-	// {
-	// 	start_ppp
-	// 	auto a = var(1.)
-	// 	auto b = var(1.)
-	// 	start_pfor(k,0,10,1)
-	// 		auto q = a;
-	// 		a=b;
-	// 		b=q+a;
-	// 	end_pfor
-	// 	pcout << a;
-	// 	pfout("fibonacci.out") << a;
-	// 	end_ppp
-	// }
+	// test defines
+	{
+		start_ppp;
+		auto a = var(1.);
+		auto b = var(1.);
+		start_pfor(k, 0, 10, 1);
+			auto q = var(a);
+		// a=b;
+		// b=q+a;
+			assign(b, a);
+			assign(q + a, b);
+		end_pfor;
+		pcout << a;
+		pfout("fibonacci.out") << a;
+		end_ppp;
+	}
 	auto end = chrono::high_resolution_clock::now();
 	auto diff = end - start;
 	cout << chrono::duration<double, chrono::milliseconds::period>(diff).count() << " ms - total execution time" << endl;
