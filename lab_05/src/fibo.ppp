@@ -1,0 +1,13 @@
+start_ppp;
+auto a = var(1.);
+auto b = var(1.);
+start_pfor(k, 0, 10, 1);
+auto q = var(a);
+// a=b;
+// b=q+a;
+ppp_assign(b, a);
+ppp_assign(q + a, b);
+end_pfor;
+pcout << a;
+pfout("fibonacci.out") << a;
+end_ppp;
