@@ -202,7 +202,7 @@ struct ppp_compilator {
 			bp::std_out > data);
 		c.wait();
 		// cout << data. << endl;
-		cout << 'a' << endl;
+		cout << "success" << endl;
 		return true;
 	}
 };

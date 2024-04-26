@@ -547,7 +547,8 @@ public:
 
 // support ppp usage via defines
 #define start_ppp ppp p;
-#define end_ppp p.calculate();
+#define ppp_show_info p.print_thread_info = true;
+#define run_ppp p.calculate();
 #define var(v) p.add_variable((v));
 #define ppp_assign(from, to) p.expression_assignment((from), (to));
 #define start_pfor(varname, a, b, c) \

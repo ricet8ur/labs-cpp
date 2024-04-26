@@ -8,13 +8,11 @@ int main(int argc, char* argv[])
 		ppp p;
 		p.print_thread_info = true;
 
-		auto x = p.add_variable(1.); // 1. -> var -> x
+		auto x = p.add_variable(1.);
 
-		auto y = p.add_variable(5.); // 5. -> var -> y
-		auto a = p.add_variable(x); // copy constructor as x -> a
+		auto y = p.add_variable(5.);
+		auto a = p.add_variable(x);
 		p.expression_assignment(y, a);
-		// a = y; // copy assignment as y -> a
-		// a = a + y;
 		p.expression_assignment(a + y, a);
 	}
 
@@ -81,7 +79,7 @@ int main(int argc, char* argv[])
 		end_pfor;
 		pcout << a;
 		pfout("fibonacci.out") << a;
-		end_ppp;
+		run_ppp;
 	}
 	auto end = chrono::high_resolution_clock::now();
 	auto diff = end - start;
