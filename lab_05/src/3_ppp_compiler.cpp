@@ -48,7 +48,7 @@ struct ppp_compilator {
 			// bp::std_err.close(),
 			bp::std_out > data);
 		c.wait();
-		// cout << data. << endl;
+		// cout << data << endl;
 		cout << "success" << endl;
 		return true;
 	}
